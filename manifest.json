@@ -1,0 +1,15 @@
+{
+    "display_name": "Image Generation (Profile Fork)",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "generate_interceptor": "ImageGen_ProcessTriggers",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Fork of Cohee#1207's Image Generation extension",
+    "version": "1.0.0",
+    "homePage": "https://github.com/SillyTavern/SillyTavern",
+    "hooks": {
+        "activate": "init"
+    }
+}
