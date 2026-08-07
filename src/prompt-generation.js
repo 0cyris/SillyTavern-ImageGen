@@ -1,5 +1,6 @@
 import { getContext } from '../../../../extensions.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
+import { collectReferenceImages, getReferenceTargets } from './reference-images.js';
 
 /**
  * Whether the Connection Manager extension is enabled and a prompt-generation profile is selected.
@@ -28,9 +29,11 @@ export function isProfilePromptAvailable(settings) {
  * @param {string} quietPrompt The instruction text for this generation mode (already formatted by getQuietPrompt)
  * @param {number} generationType The generationMode enum value
  * @param {any} settings Fork settings object (S)
- * @returns {Promise<Array<{role: string, content: string, name?: string}>>}
+ * @param {boolean} [allowImages] Whether to attach reference images to the final user message.
+ *   Must be false for text-completion profiles, which flatten messages to a string.
+ * @returns {Promise<Array<{role: string, content: string | Array<any>, name?: string}>>}
  */
-export async function buildContextMessages(quietPrompt, generationType, settings) {
+export async function buildContextMessages(quietPrompt, generationType, settings, allowImages = false) {
     const context = getContext();
     const messages = [];
 
@@ -38,14 +41,17 @@ export async function buildContextMessages(quietPrompt, generationType, settings
         messages.push({ role: 'system', content: context.substituteParams(settings.prompt_system) });
     }
 
-    if (settings.prompt_include_card) {
+    if (settings.prompt_include_card || settings.prompt_include_persona) {
         const fields = context.getCharacterCardFields();
-        const parts = [];
-        if (fields.description) parts.push(`Description:\n${fields.description}`);
-        if (fields.personality) parts.push(`Personality:\n${fields.personality}`);
-        if (fields.scenario) parts.push(`Scenario:\n${fields.scenario}`);
-        if (parts.length) {
-            messages.push({ role: 'system', content: parts.join('\n\n') });
+
+        if (settings.prompt_include_card) {
+            const parts = [];
+            if (fields.description) parts.push(`Description:\n${fields.description}`);
+            if (fields.personality) parts.push(`Personality:\n${fields.personality}`);
+            if (fields.scenario) parts.push(`Scenario:\n${fields.scenario}`);
+            if (parts.length) {
+                messages.push({ role: 'system', content: parts.join('\n\n') });
+            }
         }
 
         if (settings.prompt_include_persona && fields.persona) {
@@ -76,7 +82,28 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     }
 
     // The image-prompt instruction is always sent as the final USER message, not a system/OOC turn.
-    messages.push({ role: 'user', content: quietPrompt });
+    let finalContent = quietPrompt;
+
+    if (allowImages && settings.prompt_reference_enabled) {
+        const intrinsic = getReferenceTargets(generationType);
+        const targets = {
+            user: intrinsic.user && !!settings.prompt_reference_user,
+            char: intrinsic.char && !!settings.prompt_reference_char,
+        };
+        const images = await collectReferenceImages(targets, Number(settings.prompt_reference_max) || 0);
+
+        if (images.length > 0) {
+            finalContent = [
+                { type: 'text', text: quietPrompt },
+                ...images.flatMap(img => ([
+                    { type: 'text', text: `Reference image — ${img.label}:` },
+                    { type: 'image_url', image_url: { url: img.dataUrl } },
+                ])),
+            ];
+        }
+    }
+
+    messages.push({ role: 'user', content: finalContent });
 
     return messages;
 }
@@ -93,12 +120,17 @@ export async function generatePromptViaProfile(quietPrompt, generationType, sett
     const profileId = settings.prompt_profile;
     const profile = ConnectionManagerRequestService.getProfile(profileId);
     const apiMap = ConnectionManagerRequestService.validateProfile(profile);
+    const isTextCompletion = apiMap.selected === 'textgenerationwebui';
 
-    const messages = await buildContextMessages(quietPrompt, generationType, settings);
+    if (isTextCompletion && settings.prompt_reference_enabled) {
+        console.warn('ImageGen: reference images are not supported on text-completion Connection Profiles, skipping.');
+    }
+
+    const messages = await buildContextMessages(quietPrompt, generationType, settings, !isTextCompletion);
 
     // sendRequest passes `prompt` straight through for text-completion profiles - it does not
     // accept a message array there, so it must be pre-flattened via constructPrompt.
-    const payload = apiMap.selected === 'textgenerationwebui'
+    const payload = isTextCompletion
         ? ConnectionManagerRequestService.constructPrompt(messages, profileId)
         : messages;
 

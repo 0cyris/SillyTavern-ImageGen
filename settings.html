@@ -71,6 +71,22 @@
                     <input id="sd_prompt_include_wi" type="checkbox" />
                     <span data-i18n="ImageGen: Include World Info">Include World Info</span>
                 </label>
+                <label for="sd_prompt_reference_enabled" class="checkbox_label" data-i18n="[title]sd_prompt_reference_enabled" title="Send persona/character avatars to the prompt-generation LLM so it can describe their actual appearance. Requires a vision-capable Connection Profile.">
+                    <input id="sd_prompt_reference_enabled" type="checkbox" />
+                    <span data-i18n="ImageGen: Send avatars to prompt LLM">Send avatars to prompt LLM (vision)</span>
+                </label>
+                <div id="sd_prompt_reference_options">
+                    <label for="sd_prompt_reference_user" class="checkbox_label">
+                        <input id="sd_prompt_reference_user" type="checkbox" />
+                        <span data-i18n="ImageGen: Include persona avatar">Include persona avatar</span>
+                    </label>
+                    <label for="sd_prompt_reference_char" class="checkbox_label">
+                        <input id="sd_prompt_reference_char" type="checkbox" />
+                        <span data-i18n="ImageGen: Include character avatar(s)">Include character avatar(s)</span>
+                    </label>
+                    <label for="sd_prompt_reference_max" data-i18n="ImageGen: Max reference images">Max reference images</label>
+                    <input id="sd_prompt_reference_max" type="number" class="text_pole" min="1" max="10" step="1" />
+                </div>
             </div>
             <hr>
             <label for="sd_source" data-i18n="Source">Source</label>
@@ -303,6 +319,26 @@
                         <label for="sd_openrouter_n" data-i18n="ImageGen: Number of images">Number of images</label>
                         <input id="sd_openrouter_n" type="number" class="text_pole" min="1" max="10" step="1" />
                     </div>
+                </div>
+                <hr>
+                <label for="sd_image_reference_enabled" class="checkbox_label" data-i18n="[title]sd_image_reference_enabled" title="Send persona/character avatars as reference images to the OpenRouter image model, so generated images stay visually consistent. Only works with models that declare input_references support.">
+                    <input id="sd_image_reference_enabled" type="checkbox" />
+                    <span data-i18n="ImageGen: Send avatars as reference images">Send avatars as reference images</span>
+                </label>
+                <div id="sd_openrouter_reference_unsupported" class="warning" style="display:none;">
+                    Selected model does not support reference images. They will not be sent.
+                </div>
+                <div id="sd_image_reference_options">
+                    <label for="sd_image_reference_user" class="checkbox_label">
+                        <input id="sd_image_reference_user" type="checkbox" />
+                        <span data-i18n="ImageGen: Include persona avatar">Include persona avatar</span>
+                    </label>
+                    <label for="sd_image_reference_char" class="checkbox_label">
+                        <input id="sd_image_reference_char" type="checkbox" />
+                        <span data-i18n="ImageGen: Include character avatar(s)">Include character avatar(s)</span>
+                    </label>
+                    <label for="sd_image_reference_max" data-i18n="ImageGen: Max reference images">Max reference images</label>
+                    <input id="sd_image_reference_max" type="number" class="text_pole" min="1" max="10" step="1" />
                 </div>
             </div>
             <div data-sd-source="comfy">

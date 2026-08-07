@@ -4,18 +4,14 @@ import {
     appendMediaToMessage,
     event_types,
     eventSource,
-    formatCharacterAvatar,
     generateQuietPrompt,
-    getCharacterAvatar,
     getCurrentChatId,
     getRequestHeaders,
-    getUserAvatar,
     saveSettingsDebounced,
     substituteParams,
     substituteParamsExtended,
     systemUserName,
     this_chid,
-    user_avatar,
 } from '../../../../script.js';
 import {
     doExtrasFetch,
@@ -67,6 +63,7 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { migrateFromBuiltIn } from './src/settings-migration.js';
 import { isProfilePromptAvailable, generatePromptViaProfile } from './src/prompt-generation.js';
 import { PLUGIN_BASE, checkPlugin, isPluginAvailable } from './src/openrouter-plugin-client.js';
+import { collectReferenceImages, getReferenceTargets, resolveCharacterAvatarUrls, resolveUserAvatarUrl } from './src/reference-images.js';
 
 export { MODULE_NAME };
 
@@ -79,6 +76,9 @@ const S = extension_settings[MODULE_NAME];
 
 // This is a 1x1 transparent PNG
 const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+/** @type {Map<string, number>} OpenRouter image model id -> max input_references, populated by loadOpenRouterModels(). */
+const openRouterInputReferenceMax = new Map();
 
 const sources = {
     extras: 'extras',
@@ -252,12 +252,24 @@ const defaultSettings = {
     prompt_include_wi: false,
     prompt_history_depth: 10,
 
+    // Reference images sent to the prompt-generation LLM (needs a vision-capable profile)
+    prompt_reference_enabled: false,
+    prompt_reference_user: true,
+    prompt_reference_char: true,
+    prompt_reference_max: 2,
+
     // OpenRouter /v1/images-only options (used when the imagegen-openrouter server plugin is present)
     openrouter_resolution: '',
     openrouter_quality: '',
     openrouter_output_format: '',
     openrouter_seed: -1,
     openrouter_n: 1,
+
+    // Reference images sent to the OpenRouter image model (input_references)
+    image_reference_enabled: false,
+    image_reference_user: true,
+    image_reference_char: true,
+    image_reference_max: 2,
 
     // CFG Scale
     scale_min: 1,
@@ -580,11 +592,21 @@ async function loadSettings() {
     $('#sd_prompt_include_persona').prop('checked', S.prompt_include_persona);
     $('#sd_prompt_include_wi').prop('checked', S.prompt_include_wi);
     $('#sd_prompt_profile_options').toggle(!!S.prompt_profile);
+    $('#sd_prompt_reference_enabled').prop('checked', S.prompt_reference_enabled);
+    $('#sd_prompt_reference_user').prop('checked', S.prompt_reference_user);
+    $('#sd_prompt_reference_char').prop('checked', S.prompt_reference_char);
+    $('#sd_prompt_reference_max').val(S.prompt_reference_max);
+    $('#sd_prompt_reference_options').toggle(!!S.prompt_reference_enabled);
     $('#sd_openrouter_resolution').val(S.openrouter_resolution);
     $('#sd_openrouter_quality').val(S.openrouter_quality);
     $('#sd_openrouter_output_format').val(S.openrouter_output_format);
     $('#sd_openrouter_seed').val(S.openrouter_seed);
     $('#sd_openrouter_n').val(S.openrouter_n);
+    $('#sd_image_reference_enabled').prop('checked', S.image_reference_enabled);
+    $('#sd_image_reference_user').prop('checked', S.image_reference_user);
+    $('#sd_image_reference_char').prop('checked', S.image_reference_char);
+    $('#sd_image_reference_max').val(S.image_reference_max);
+    $('#sd_image_reference_options').toggle(!!S.image_reference_enabled);
     $('#sd_clip_skip').val(S.clip_skip);
     $('#sd_clip_skip_value').val(S.clip_skip);
     $('#sd_seed').val(S.seed);
@@ -620,6 +642,7 @@ async function loadSettings() {
     $('#sd_openrouter_plugin_missing').toggle(!isPluginAvailable());
 
     await loadSettingOptions();
+    updateReferenceImageHint();
 }
 
 /**
@@ -1539,6 +1562,7 @@ async function onModelChange() {
     }
 
     switchModelSpecificControls(S.model);
+    updateReferenceImageHint();
 
     const updateRemoteModelSources = [
         sources.auto,
@@ -2084,6 +2108,17 @@ function switchModelSpecificControls(modelId) {
 }
 
 /**
+ * Shows a hint when reference images are enabled but the selected OpenRouter model doesn't
+ * declare support for input_references, so the user knows why their avatars aren't being sent.
+ */
+function updateReferenceImageHint() {
+    const unsupported = S.source === sources.openrouter
+        && !!S.image_reference_enabled
+        && !(openRouterInputReferenceMax.get(S.model) > 0);
+    $('#sd_openrouter_reference_unsupported').toggle(unsupported);
+}
+
+/**
  * Ensure the Electron Hub quality select is populated based on the selected model.
  * @param {any[]} models Array of models
  */
@@ -2565,6 +2600,8 @@ async function loadZaiModels() {
 }
 
 async function loadOpenRouterModels() {
+    openRouterInputReferenceMax.clear();
+
     if (isPluginAvailable()) {
         const result = await fetch(`${PLUGIN_BASE}/models`, {
             method: 'GET',
@@ -2572,12 +2609,17 @@ async function loadOpenRouterModels() {
         });
 
         if (result.ok) {
-            return await result.json();
+            const models = await result.json();
+            for (const model of models) {
+                openRouterInputReferenceMax.set(model.value, Number(model.input_references_max) || 0);
+            }
+            return models;
         }
 
         return [];
     }
 
+    // The non-plugin fallback endpoint carries no input_references capability data.
     const result = await fetch('/api/openrouter/models/image', {
         method: 'POST',
         headers: getRequestHeaders({ omitContentType: true }),
@@ -3324,21 +3366,11 @@ async function generateMultimodalPrompt(generationType, quietPrompt) {
 }
 
 function getCharacterAvatarUrl() {
-    const context = getContext();
-
-    if (context.groupId) {
-        const groupMembers = context.groups.find(x => x.id === context.groupId)?.members;
-        const lastMessageAvatar = context.chat?.filter(x => !x.is_system && !x.is_user)?.slice(-1)[0]?.original_avatar;
-        const randomMemberAvatar = Array.isArray(groupMembers) ? groupMembers[Math.floor(Math.random() * groupMembers.length)] : null;
-        const avatarToUse = lastMessageAvatar || randomMemberAvatar;
-        return formatCharacterAvatar(avatarToUse);
-    } else {
-        return getCharacterAvatar(context.characterId);
-    }
+    return resolveCharacterAvatarUrls(1)[0];
 }
 
 function getUserAvatarUrl() {
-    return getUserAvatar(user_avatar);
+    return resolveUserAvatarUrl();
 }
 
 /**
@@ -3353,6 +3385,19 @@ async function generatePrompt(quietPrompt, generationType, signal) {
     const toast = toastr.info('Generating image prompt with an LLM...', 'Image Generation');
     let reply;
 
+    const getFallbackQuietImage = async () => {
+        if (!S.prompt_reference_enabled) {
+            return null;
+        }
+        const intrinsic = getReferenceTargets(generationType);
+        const targets = {
+            user: intrinsic.user && !!S.prompt_reference_user,
+            char: intrinsic.char && !!S.prompt_reference_char,
+        };
+        const images = await collectReferenceImages(targets, 1);
+        return images[0]?.dataUrl ?? null;
+    };
+
     try {
         if (isProfilePromptAvailable(S)) {
             try {
@@ -3360,10 +3405,10 @@ async function generatePrompt(quietPrompt, generationType, signal) {
             } catch (error) {
                 console.warn('ImageGen: profile prompt generation failed, falling back to the chat connection', error);
                 toastr.warning('Connection profile failed; using the chat connection instead.', 'Image Generation');
-                reply = await generateQuietPrompt({ quietPrompt });
+                reply = await generateQuietPrompt({ quietPrompt, quietImage: await getFallbackQuietImage() });
             }
         } else {
-            reply = await generateQuietPrompt({ quietPrompt });
+            reply = await generateQuietPrompt({ quietPrompt, quietImage: await getFallbackQuietImage() });
         }
     } finally {
         toastr.clear(toast);
@@ -3508,7 +3553,7 @@ async function sendGenerationRequest(generationType, prompt, additionalNegativeP
                 result = await generateZaiImage(prefixedPrompt, signal);
                 break;
             case sources.openrouter:
-                result = await generateOpenRouterImage(prefixedPrompt, signal);
+                result = await generateOpenRouterImage(prefixedPrompt, signal, generationType);
                 break;
             case sources.workersai:
                 result = await generateWorkersAIImage(prefixedPrompt, negativePrompt, signal);
@@ -4808,9 +4853,10 @@ async function generateZaiImage(prompt, signal) {
  * to the built-in chat/completions-based endpoint when the plugin is not installed.
  * @param {string} prompt The main instruction used to guide the image generation.
  * @param {AbortSignal} signal An AbortSignal object that can be used to cancel the request.
+ * @param {number} [generationType] The generationMode enum value, used to pick reference avatars.
  * @returns {Promise<{format: string, data: string}>}
  */
-async function generateOpenRouterImage(prompt, signal) {
+async function generateOpenRouterImage(prompt, signal, generationType) {
     if (isPluginAvailable()) {
         const body = {
             model: S.model,
@@ -4823,6 +4869,20 @@ async function generateOpenRouterImage(prompt, signal) {
         if (S.openrouter_output_format) body.output_format = S.openrouter_output_format;
         if (Number(S.openrouter_seed) >= 0) body.seed = Number(S.openrouter_seed);
         if (Number(S.openrouter_n) > 0) body.n = Number(S.openrouter_n);
+
+        const referenceMax = openRouterInputReferenceMax.get(S.model) || 0;
+        if (S.image_reference_enabled && referenceMax > 0 && generationType !== undefined) {
+            const intrinsic = getReferenceTargets(generationType);
+            const targets = {
+                user: intrinsic.user && !!S.image_reference_user,
+                char: intrinsic.char && !!S.image_reference_char,
+            };
+            const limit = Math.min(referenceMax, Number(S.image_reference_max) || 0);
+            const images = await collectReferenceImages(targets, limit);
+            if (images.length > 0) {
+                body.input_references = images.map(img => ({ type: 'image_url', image_url: { url: img.dataUrl } }));
+            }
+        }
 
         const result = await fetch(`${PLUGIN_BASE}/generate`, {
             method: 'POST',
@@ -6020,6 +6080,23 @@ export async function init() {
         S.prompt_include_wi = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
+    $('#sd_prompt_reference_enabled').on('input', function () {
+        S.prompt_reference_enabled = !!$(this).prop('checked');
+        $('#sd_prompt_reference_options').toggle(S.prompt_reference_enabled);
+        saveSettingsDebounced();
+    });
+    $('#sd_prompt_reference_user').on('input', function () {
+        S.prompt_reference_user = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+    $('#sd_prompt_reference_char').on('input', function () {
+        S.prompt_reference_char = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+    $('#sd_prompt_reference_max').on('input', function () {
+        S.prompt_reference_max = Number($(this).val());
+        saveSettingsDebounced();
+    });
     $('#sd_openrouter_resolution').on('change', function () {
         S.openrouter_resolution = String($(this).val());
         saveSettingsDebounced();
@@ -6038,6 +6115,24 @@ export async function init() {
     });
     $('#sd_openrouter_n').on('input', function () {
         S.openrouter_n = Number($(this).val());
+        saveSettingsDebounced();
+    });
+    $('#sd_image_reference_enabled').on('input', function () {
+        S.image_reference_enabled = !!$(this).prop('checked');
+        $('#sd_image_reference_options').toggle(S.image_reference_enabled);
+        updateReferenceImageHint();
+        saveSettingsDebounced();
+    });
+    $('#sd_image_reference_user').on('input', function () {
+        S.image_reference_user = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+    $('#sd_image_reference_char').on('input', function () {
+        S.image_reference_char = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+    $('#sd_image_reference_max').on('input', function () {
+        S.image_reference_max = Number($(this).val());
         saveSettingsDebounced();
     });
     setUpPromptProfileDropdown();

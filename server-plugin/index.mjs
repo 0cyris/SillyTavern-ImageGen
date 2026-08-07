@@ -1,6 +1,41 @@
 import fetch from 'node-fetch';
 
 const API = 'https://openrouter.ai/api/v1';
+const DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
+const MAX_INPUT_REFERENCES = 16;
+const MAX_TOTAL_BASE64_LENGTH = 24 * 1024 * 1024;
+
+/**
+ * Validates a client-supplied input_references array before it's forwarded upstream with
+ * the user's own API key. Only same-origin-produced base64 data URLs are allowed - the
+ * client always sends data URLs, so accepting arbitrary http(s) URLs here would let a
+ * caller make OpenRouter fetch attacker-controlled URLs on the user's behalf.
+ * @param {any} value
+ * @returns {{ok: true, value: Array<{type: string, image_url: {url: string}}>} | {ok: false, error: string}}
+ */
+function validateInputReferences(value) {
+    if (!Array.isArray(value)) {
+        return { ok: false, error: 'input_references must be an array' };
+    }
+    if (value.length > MAX_INPUT_REFERENCES) {
+        return { ok: false, error: `input_references must not exceed ${MAX_INPUT_REFERENCES} entries` };
+    }
+
+    let totalLength = 0;
+    for (const entry of value) {
+        const url = entry?.image_url?.url;
+        if (!entry || entry.type !== 'image_url' || typeof url !== 'string' || !DATA_URL_RE.test(url)) {
+            return { ok: false, error: 'each input_references entry must be {type: "image_url", image_url: {url: <base64 data URL>}}' };
+        }
+        totalLength += url.length;
+    }
+
+    if (totalLength > MAX_TOTAL_BASE64_LENGTH) {
+        return { ok: false, error: 'input_references total size exceeds the allowed limit' };
+    }
+
+    return { ok: true, value };
+}
 
 /** @type {typeof import('../../src/endpoints/secrets.js').readSecret | null} */
 let readSecret = null;
@@ -68,7 +103,11 @@ export async function init(router) {
             /** @type {any} */
             const data = await response.json();
             const models = (Array.isArray(data?.data) ? data.data : [])
-                .map(m => ({ value: String(m.id), text: String(m.name || m.id) }));
+                .map(m => ({
+                    value: String(m.id),
+                    text: String(m.name || m.id),
+                    input_references_max: Number(m?.supported_parameters?.input_references?.max) || 0,
+                }));
 
             return res.json(models);
         } catch (error) {
@@ -85,7 +124,7 @@ export async function init(router) {
                 return res.status(400).json({ error: 'OpenRouter API key not set in SillyTavern.' });
             }
 
-            const { model, prompt, aspect_ratio, background, n, output_format, output_compression, quality, resolution, seed } = req.body ?? {};
+            const { model, prompt, aspect_ratio, background, n, output_format, output_compression, quality, resolution, seed, input_references } = req.body ?? {};
 
             if (!model || !prompt) {
                 return res.status(400).json({ error: 'model and prompt are required' });
@@ -103,6 +142,14 @@ export async function init(router) {
                     continue;
                 }
                 body[key2] = value;
+            }
+
+            if (input_references !== undefined) {
+                const validated = validateInputReferences(input_references);
+                if (!validated.ok) {
+                    return res.status(400).json({ error: validated.error });
+                }
+                body.input_references = validated.value;
             }
 
             const response = await fetch(`${API}/images`, {

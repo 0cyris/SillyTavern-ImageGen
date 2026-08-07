@@ -57,6 +57,31 @@ Without this plugin, OpenRouter generation falls back to the built-in
 If the Connection Manager extension is disabled, or the selected profile fails, generation
 falls back automatically to the chat connection with a warning toast.
 
+## Reference images (persona / character avatars)
+
+Two independent features send avatars as visual reference. Neither implies the other — you
+can enable one, both, or neither, with separate include-checkboxes and limits each:
+
+- **Send avatars as reference images** (OpenRouter source only, under the OpenRouter
+  panel). Attaches the persona/character avatar(s) to the image generation request itself
+  via OpenRouter's `input_references`, so generated images stay visually consistent with
+  the card art. Requires the [server plugin](#openrouter-server-plugin-optional-but-recommended-for-openrouter)
+  and a model that declares `input_references` support — a warning appears in settings when
+  the selected model doesn't support it.
+- **Send avatars to prompt LLM (vision)** (under "Prompt Generation"). Attaches avatars as
+  image content parts on the final message sent to the prompt-generation Connection
+  Profile, so a vision-capable model can describe the character's actual appearance instead
+  of guessing. Works with any image-generation source, since it only affects the text
+  prompt. Not supported on text-completion profiles (images are silently skipped with a
+  console warning); when no Connection Profile is selected, the first collected image is
+  passed to the chat connection's own quiet-generation call instead.
+
+Which avatars are attached is decided automatically by generation mode: `me`/user modes use
+the persona avatar, `you`/`face` modes use the character avatar, scene-wide modes (`scene`,
+`last`, free mode) use both, and `background` uses neither. In group chats, avatars are
+collected from the most recent distinct speakers, capped at the smaller of the model's own
+limit and your configured maximum.
+
 ## Notes
 
 - If you have `minimal_prompt_processing` off and use a chatty model for prompt generation,
