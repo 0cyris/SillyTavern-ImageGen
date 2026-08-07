@@ -188,43 +188,21 @@ const promptTemplates = {
         'The text prompt used to generate the image.',
         'Must represent an exhaustive description of the desired image that will allow an artist or a photographer to perfectly recreate it.',
     ].join(' '),
-    [generationMode.CHARACTER]: 'In the next response I want you to provide only a detailed comma-delimited list of keywords and phrases which describe {{char}}. The list must include all of the following items in this order: name, species and race, gender, age, clothing, occupation, physical features and appearances. Do not include descriptions of non-visual qualities such as personality, movements, scents, mental traits, or anything which could not be seen in a still photograph. Do not write in full sentences. Prefix your description with the phrase \'full body portrait,\'',
+    [generationMode.CHARACTER]: 'Write a vivid, natural-language description of {{char}}\'s physical appearance, as if briefing an artist who has never seen them. Cover, in this order: species/race, gender, age, clothing and accessories, occupation, and distinctive physical features. Describe only what a camera would capture in a single still frame - skip personality, backstory, scent, or anything not visible. Write flowing prose, not a list. Begin your answer with \'Full body portrait of {{char}},\' and continue from there.',
     //face-specific prompt
-    [generationMode.FACE]: 'In the next response I want you to provide only a detailed comma-delimited list of keywords and phrases which describe {{char}}. The list must include all of the following items in this order: name, species and race, gender, age, facial features and expressions, occupation, hair and hair accessories (if any), what they are wearing on their upper body (if anything). Do not describe anything below their neck. Do not include descriptions of non-visual qualities such as personality, movements, scents, mental traits, or anything which could not be seen in a still photograph. Do not write in full sentences. Prefix your description with the phrase \'close up facial portrait,\'',
+    [generationMode.FACE]: 'Write a vivid, natural-language description of {{char}}\'s face and upper body, as if briefing a portrait photographer. Cover, in this order: facial features and expression, occupation, hair (style, color, accessories), and what they\'re wearing above the neckline - describe nothing below the shoulders. Describe only what\'s visible in a single still frame - skip personality, backstory, scent, or anything not visible. Write flowing prose, not a list. Begin your answer with \'Close-up facial portrait of {{char}},\' and continue from there.',
     //prompt for only the last message
-    [generationMode.USER]: 'Ignore previous instructions and provide a detailed description of {{user}}\'s physical appearance from the perspective of {{char}} in the form of a comma-delimited list of keywords and phrases. The list must include all of the following items in this order: name, species and race, gender, age, clothing, occupation, physical features and appearances. Do not include descriptions of non-visual qualities such as personality, movements, scents, mental traits, or anything which could not be seen in a still photograph. Do not write in full sentences. Prefix your description with the phrase \'full body portrait,\'. Ignore the rest of the story when crafting this description. Do not reply as {{char}} when writing this description, and do not attempt to continue the story.',
-    [generationMode.SCENARIO]: 'Ignore previous instructions and provide a detailed description for all of the following: a brief recap of recent events in the story, {{char}}\'s appearance, and {{char}}\'s surroundings. Do not reply as {{char}} while writing this description.',
+    [generationMode.USER]: 'From {{char}}\'s point of view, write a vivid, natural-language description of {{user}}\'s physical appearance, as if briefing an artist who has never seen them. Cover, in this order: species/race, gender, age, clothing and accessories, occupation, and distinctive physical features. Describe only what\'s visible in a single still frame - skip personality, backstory, or anything not visible. Write flowing prose, not a list. Begin your answer with \'Full body portrait of {{user}},\' and continue from there. Answer only with the description - do not reply as {{char}} or continue the roleplay.',
+    [generationMode.SCENARIO]: 'Write a vivid, natural-language visual description covering: a brief recap of what\'s currently happening, {{char}}\'s appearance, and {{char}}\'s surroundings. Describe only what a viewer would see - skip dialogue, thoughts, and backstory. Write it as flowing prose, not a list. Answer only with the description - do not reply as {{char}} or continue the story.',
 
-    [generationMode.NOW]: `Ignore previous instructions. Your next response must be formatted as a single comma-delimited list of concise keywords.  The list will describe of the visual details included in the last chat message.
+    [generationMode.NOW]: 'Write a vivid, natural-language description of what\'s happening in the most recent chat message, as if briefing an illustrator on a single frame to draw. Cover: the setting, who\'s present and their physical appearance, their positioning relative to each other if relevant, and the primary action taking place. Describe only what a viewer would see in that instant - skip dialogue, thoughts, and anything not visible. Write flowing prose, not a fixed list or format. If characters are physically interacting, be specific about how.',
 
-    Only mention characters by using pronouns ('he','his','she','her','it','its') or neutral nouns ('male', 'the man', 'female', 'the woman').
-
-    Ignore non-visible things such as feelings, personality traits, thoughts, and spoken dialog.
-
-    Add keywords in this precise order:
-    a keyword to describe the location of the scene,
-    a keyword to mention how many characters of each gender or type are present in the scene (minimum of two characters:
-    {{user}} and {{char}}, example: '2 men ' or '1 man 1 woman ', '1 man 3 robots'),
-
-    keywords to describe the relative physical positioning of the characters to each other (if a commonly known term for the positioning is known use it instead of describing the positioning in detail) + 'POV',
-
-    a single keyword or phrase to describe the primary act taking place in the last chat message,
-
-    keywords to describe {{char}}'s physical appearance and facial expression,
-    keywords to describe {{char}}'s actions,
-    keywords to describe {{user}}'s physical appearance and actions.
-
-    If character actions involve direct physical interaction with another character, mention specifically which body parts interacting and how.
-
-    A correctly formatted example response would be:
-    '(location),(character list by gender),(primary action), (relative character position) POV, (character 1's description and actions), (character 2's description and actions)'`,
-
-    [generationMode.RAW_LAST]: 'Ignore previous instructions and provide ONLY the last chat message string back to me verbatim. Do not write anything after the string. Do not reply as {{char}} when writing this description, and do not attempt to continue the story.',
-    [generationMode.BACKGROUND]: 'Ignore previous instructions and provide a detailed description of {{char}}\'s surroundings in the form of a comma-delimited list of keywords and phrases. The list must include all of the following items in this order: location, time of day, weather, lighting, and any other relevant details. Do not include descriptions of characters and non-visual qualities such as names, personality, movements, scents, mental traits, or anything which could not be seen in a still photograph. Do not write in full sentences. Prefix your description with the phrase \'background,\'. Ignore the rest of the story when crafting this description. Do not reply as {{char}} when writing this description, and do not attempt to continue the story.',
-    [generationMode.FACE_MULTIMODAL]: 'Provide an exhaustive comma-separated list of tags describing the appearance of the character on this image in great detail. Start with "close-up portrait".',
-    [generationMode.CHARACTER_MULTIMODAL]: 'Provide an exhaustive comma-separated list of tags describing the appearance of the character on this image in great detail. Start with "full body portrait".',
-    [generationMode.USER_MULTIMODAL]: 'Provide an exhaustive comma-separated list of tags describing the appearance of the character on this image in great detail. Start with "full body portrait".',
-    [generationMode.FREE_EXTENDED]: 'Ignore previous instructions and provide an exhaustive comma-separated list of tags describing the appearance of "{0}" in great detail. Start with {{charPrefix}} (sic) if the subject is associated with {{char}}.',
+    [generationMode.RAW_LAST]: 'Step outside the roleplay for a moment: reply with only the exact text of the last chat message, copied verbatim, with nothing before or after it - no roleplay, no narration, no commentary.',
+    [generationMode.BACKGROUND]: 'Write a vivid, natural-language description of {{char}}\'s current surroundings only - no characters or people. Cover: location, time of day, weather, and lighting, plus any other notable visual details. Describe only what\'s visible in a single still frame. Write flowing prose, not a list. Begin your answer with \'Background,\' and continue from there. Answer only with the description - do not reply as {{char}} or continue the story.',
+    [generationMode.FACE_MULTIMODAL]: 'Write a vivid, natural-language description of this character\'s face and appearance based on the image, in great detail. Begin your answer with \'Close-up portrait,\' and continue from there.',
+    [generationMode.CHARACTER_MULTIMODAL]: 'Write a vivid, natural-language description of this character\'s appearance based on the image, in great detail. Begin your answer with \'Full body portrait,\' and continue from there.',
+    [generationMode.USER_MULTIMODAL]: 'Write a vivid, natural-language description of this person\'s appearance based on the image, in great detail. Begin your answer with \'Full body portrait,\' and continue from there.',
+    [generationMode.FREE_EXTENDED]: 'Write a vivid, natural-language visual description of "{0}" in great detail, as if briefing an artist who has never seen them. If the subject is {{char}} or closely associated with {{char}}, begin your answer with the word "char," (that literal word, followed by a comma) before the description.',
 };
 
 const defaultPrefix = 'best quality, absurdres, aesthetic,';
@@ -3350,7 +3328,7 @@ async function generateMultimodalPrompt(generationType, quietPrompt) {
         const avatarBlob = await response.blob();
         const avatarBase64 = await getBase64Async(avatarBlob);
 
-        const caption = await getMultimodalCaption(avatarBase64, quietPrompt);
+        const caption = await getMultimodalCaption(avatarBase64, substituteParams(quietPrompt));
         toastr.clear(toast);
 
         if (!caption) {

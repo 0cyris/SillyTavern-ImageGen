@@ -55,7 +55,7 @@ export async function buildContextMessages(quietPrompt, generationType, settings
         }
 
         if (settings.prompt_include_persona && fields.persona) {
-            messages.push({ role: 'system', content: `{{user}}'s persona:\n${fields.persona}` });
+            messages.push({ role: 'system', content: context.substituteParams(`{{user}}'s persona:\n${fields.persona}`) });
         }
     }
 
@@ -82,7 +82,10 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     }
 
     // The image-prompt instruction is always sent as the final USER message, not a system/OOC turn.
-    let finalContent = quietPrompt;
+    // {{char}}/{{user}}/etc. macros in the template must be resolved here - nothing downstream
+    // (ConnectionManagerRequestService.sendRequest / ChatCompletionService) substitutes them.
+    const instruction = context.substituteParams(quietPrompt);
+    let finalContent = instruction;
 
     if (allowImages && settings.prompt_reference_enabled) {
         const intrinsic = getReferenceTargets(generationType);
@@ -94,7 +97,7 @@ export async function buildContextMessages(quietPrompt, generationType, settings
 
         if (images.length > 0) {
             finalContent = [
-                { type: 'text', text: quietPrompt },
+                { type: 'text', text: instruction },
                 ...images.flatMap(img => ([
                     { type: 'text', text: `Reference image — ${img.label}:` },
                     { type: 'image_url', image_url: { url: img.dataUrl } },
