@@ -82,6 +82,24 @@ the persona avatar, `you`/`face` modes use the character avatar, scene-wide mode
 collected from the most recent distinct speakers, capped at the smaller of the model's own
 limit and your configured maximum.
 
+### Why only OpenRouter?
+
+The reference-image-to-image-model path (`input_references`) is OpenRouter-only for now —
+not because other backends couldn't benefit from it, but because OpenRouter is the only
+backend this fork talks to through a server plugin it fully owns
+(`plugins/imagegen-openrouter`). Every other backend (A1111, ComfyUI, NovelAI, Stability,
+Horde, WorkersAI, etc.) goes through SillyTavern's own core server routes (`/api/sd/*`,
+`/api/horde/*`, implemented in `src/endpoints/stable-diffusion.js` and
+`src/endpoints/horde.js` in the main SillyTavern repo) — routes this extension doesn't
+control. Adding a reference-image parameter for those would mean landing changes in
+upstream SillyTavern itself, not just this fork. OpenRouter's `/v1/images` API was a much
+smaller lift: a net-new API channel with its own bundled plugin, so extending it was
+entirely self-contained.
+
+(The other reference-image feature — sending avatars to the *prompt-generation* LLM —
+already works with any Connection Profile and any image-generation source, since it never
+touches the image backend at all.)
+
 ## Notes
 
 - If you have `minimal_prompt_processing` off and use a chatty model for prompt generation,
