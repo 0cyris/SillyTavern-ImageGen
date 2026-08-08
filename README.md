@@ -58,14 +58,25 @@ falls back automatically to the chat connection with a warning toast.
 
 **Your *active chat's* preset/jailbreak is never used** — that's the entire reason this
 feature exists (see the top of this README). **The profile's own assigned Completion
-Preset is different: its Prompt Manager entries (Main Prompt, Post-History Instructions,
-any custom entries) *are* included**, positioned the same way they'd sit relative to chat
-history in that preset. Build a preset specifically for this task (a "Task" preset with its
-own Main Prompt tuned for image-prompt generation) and assign it to the profile — that's
-the intended way to shape output beyond the "System instruction" field above. Sampling
-settings (temperature, top_p, penalties, reasoning effort, etc.) from the preset apply too.
-Marker entries with no literal content of their own (World Info, character card, persona,
-chat history) are skipped — this extension already builds its own equivalents of those.
+Preset is different: it's used in full.** If the preset has its own Prompt Manager entries
+(Main Prompt, Post-History Instructions, custom entries), those are included. Its standard
+slots — World Info before/after, character description/personality, scenario, persona,
+chat history — are resolved to the real thing and placed exactly where *that preset's own
+prompt order* puts them, not a fixed sequence this extension imposes. Build a preset
+specifically for this task (a "Task" preset with its own Main Prompt tuned for image-prompt
+generation, its own slot ordering) and assign it to the profile — that's the intended way to
+shape output beyond the "System instruction" field above. Sampling settings (temperature,
+top_p, penalties, reasoning effort, etc.) apply too. If a preset has extension-prompt slots
+wired up (Summarize, Vectors, Vector Storage's data bank, Smart Context/ChromaDB), those are
+picked up from whichever of those extensions are active, same as normal chat generation.
+
+Not supported: Author's Note and character/group depth-prompts. Both live outside a
+preset's ordered prompt list entirely (position-anchored by depth or by World Info
+boundaries rather than a slot the preset's order references) and are about roleplay
+continuity rather than the preset's own formatting. When there's no preset to order by (no
+preset assigned to the profile, or a text-completion profile — whose "preset" is an
+instruct/context preset with no Prompt Manager concept at all), generation falls back to a
+fixed sequence: system instruction, card, persona, World Info, history, instruction.
 
 **If generation isn't picking up your Completion Preset at all** (neither sampling nor
 prompt content): a profile's assigned preset is a one-time snapshot of whichever Completion
