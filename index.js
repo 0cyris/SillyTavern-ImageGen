@@ -135,6 +135,7 @@ const generationMode = {
     USER_MULTIMODAL: 9,
     FACE_MULTIMODAL: 10,
     FREE_EXTENDED: 11,
+    CAST: 12,
 };
 
 const multimodalMap = {
@@ -157,6 +158,7 @@ const modeLabels = {
     [generationMode.FACE_MULTIMODAL]: 'Portrait (Multimodal Mode)',
     [generationMode.USER_MULTIMODAL]: 'User (Multimodal Mode)',
     [generationMode.FREE_EXTENDED]: 'Free Mode (LLM-Extended)',
+    [generationMode.CAST]: 'Cast ("Everyone")',
 };
 
 const triggerWords = {
@@ -167,6 +169,7 @@ const triggerWords = {
     [generationMode.NOW]: ['last'],
     [generationMode.FACE]: ['face'],
     [generationMode.BACKGROUND]: ['background'],
+    [generationMode.CAST]: ['cast'],
 };
 
 const messageTrigger = {
@@ -178,6 +181,7 @@ const messageTrigger = {
         [generationMode.NOW]: ['last message'],
         [generationMode.FACE]: ['face', 'portrait', 'selfie'],
         [generationMode.BACKGROUND]: ['background', 'scene background', 'scene', 'scenery', 'surroundings', 'environment'],
+        [generationMode.CAST]: ['cast', 'the cast', 'the group', 'the party', 'everyone'],
     },
 };
 
@@ -203,6 +207,7 @@ const promptTemplates = {
     [generationMode.CHARACTER_MULTIMODAL]: 'Write a vivid, natural-language description of this character\'s appearance based on the image, in great detail. Begin your answer with \'Full body portrait,\' and continue from there.',
     [generationMode.USER_MULTIMODAL]: 'Write a vivid, natural-language description of this person\'s appearance based on the image, in great detail. Begin your answer with \'Full body portrait,\' and continue from there.',
     [generationMode.FREE_EXTENDED]: 'Write a vivid, natural-language visual description of "{0}" in great detail, as if briefing an artist who has never seen them. If the subject is {{char}} or closely associated with {{char}}, begin your answer with the word "char," (that literal word, followed by a comma) before the description.',
+    [generationMode.CAST]: 'Write a vivid, natural-language description of a group portrait: every character currently in this scene, lined up together, photographed against a single plain, solid-colored, neutral studio background with absolutely no scenery, props, furniture, or location details of any kind. Include {{user}}, plus any other characters who exist as actual people/beings in the story and are actively present in the recent conversation. If {{char}} is themself an active participant in the scene - not merely narrating, gamemastering, or voicing other characters from the outside - include them too; otherwise leave them out entirely, since a narrator or game master does not appear in the scene they\'re running. Ignore worldbuilding, lore, and setting information entirely; focus solely on who is present and what they look like. For each person, describe their appearance, clothing, and posture distinctly enough that they can be told apart. Describe only what\'s visible in a single still frame - skip dialogue, thoughts, and backstory. The background must stay completely plain and unadorned so the focus stays entirely on the characters. Write flowing prose, not a list. Begin your answer with \'Group portrait, plain neutral background,\' and continue from there.',
 };
 
 const defaultPrefix = 'best quality, absurdres, aesthetic,';
@@ -3184,6 +3189,7 @@ function setTypeSpecificDimensions(generationType, mediaAttachment = null) {
     // 1. If there's a media attachment, match its previous dimensions
     // 2. Face images are always portrait (pun intended) - increase height if needed
     // 3. Background images are always landscape - increase width if needed
+    // 4. Cast (lineup) images are always landscape - increase width if needed
     if (Number.isInteger(mediaAttachment?.width) && Number.isInteger(mediaAttachment?.height)) {
         S.width = mediaAttachment.width;
         S.height = mediaAttachment.height;
@@ -3193,6 +3199,9 @@ function setTypeSpecificDimensions(generationType, mediaAttachment = null) {
     } else if (generationType === generationMode.BACKGROUND && aspectRatio <= 1) {
         // Round to nearest multiple of 64
         S.width = Math.round(S.height * 1.8 / 64) * 64;
+    } else if (generationType === generationMode.CAST && aspectRatio <= 1) {
+        // Round to nearest multiple of 64
+        S.width = Math.round(S.height * 1.5 / 64) * 64;
     }
 
     if (S.snap) {
@@ -3372,7 +3381,7 @@ async function generatePrompt(quietPrompt, generationType, signal) {
             user: intrinsic.user && !!S.prompt_reference_user,
             char: intrinsic.char && !!S.prompt_reference_char,
         };
-        const images = await collectReferenceImages(targets, 1);
+        const images = await collectReferenceImages(targets, 1, generationType);
         return images[0]?.dataUrl ?? null;
     };
 
@@ -3433,7 +3442,7 @@ function setUpPromptProfileDropdown() {
  * @returns
  */
 async function sendGenerationRequest(generationType, prompt, additionalNegativePrefix, characterName, callback, initiator, signal) {
-    const noCharPrefix = [generationMode.FREE, generationMode.BACKGROUND, generationMode.USER, generationMode.USER_MULTIMODAL, generationMode.FREE_EXTENDED];
+    const noCharPrefix = [generationMode.FREE, generationMode.BACKGROUND, generationMode.USER, generationMode.USER_MULTIMODAL, generationMode.FREE_EXTENDED, generationMode.CAST];
     const isCharChat = this_chid !== undefined && !selected_group;
     const ignoreNoCharForSwipe = initiator === initiators.swipe && isCharChat;
 
@@ -4856,7 +4865,7 @@ async function generateOpenRouterImage(prompt, signal, generationType) {
                 char: intrinsic.char && !!S.image_reference_char,
             };
             const limit = Math.min(referenceMax, Number(S.image_reference_max) || 0);
-            const images = await collectReferenceImages(targets, limit);
+            const images = await collectReferenceImages(targets, limit, generationType);
             if (images.length > 0) {
                 body.input_references = images.map(img => ({ type: 'image_url', image_url: { url: img.dataUrl } }));
             }
@@ -5226,6 +5235,7 @@ async function addSDGenButtons() {
             'sd_last': 'last',
             'sd_raw_last': 'raw_last',
             'sd_background': 'background',
+            'sd_cast': 'cast',
         };
 
         const param = idParamMap[id];

@@ -22,7 +22,31 @@ const generationMode = {
     USER_MULTIMODAL: 9,
     FACE_MULTIMODAL: 10,
     FREE_EXTENDED: 11,
+    CAST: 12,
 };
+
+// Multi-character modes: prompts that describe more than one person at once, and so
+// benefit from an explicit roster block (see buildRosterContextBlock) rather than relying
+// on whichever single character's card happens to already be in context.
+const ROSTER_CONTEXT_MODES = new Set([generationMode.CAST, generationMode.SCENARIO, generationMode.NOW]);
+
+/**
+ * Whether a generation mode should get an explicit "characters in this scene" context block.
+ * @param {number} mode generationMode enum value (see index.js)
+ * @returns {boolean}
+ */
+export function needsRosterContext(mode) {
+    return ROSTER_CONTEXT_MODES.has(mode);
+}
+
+/**
+ * Whether a generation mode is the Cast (group lineup) mode.
+ * @param {number} mode generationMode enum value (see index.js)
+ * @returns {boolean}
+ */
+export function isCastMode(mode) {
+    return mode === generationMode.CAST;
+}
 
 /**
  * Which avatars are intrinsically relevant to a generation mode, independent of any
@@ -46,6 +70,7 @@ export function getReferenceTargets(mode) {
         case generationMode.RAW_LAST:
         case generationMode.FREE:
         case generationMode.FREE_EXTENDED:
+        case generationMode.CAST:
             return { user: true, char: true };
         default:
             return { user: false, char: false };
@@ -99,6 +124,79 @@ export function resolveCharacterAvatarUrls(max) {
 }
 
 /**
+ * The full cast, roster-ordered rather than recency-ordered: every group member excluding
+ * muted ones, or the single active character in a solo chat. Unlike
+ * `resolveCharacterAvatarUrls`, this includes members who haven't spoken yet - appropriate
+ * for a "everyone in the scene" shot rather than "who's talking right now".
+ * @param {number} max Maximum number of avatars to return.
+ * @returns {Array<{name: string, url: string}>}
+ */
+export function resolveGroupRosterAvatars(max) {
+    const context = getContext();
+
+    if (!context.groupId) {
+        return [{ name: context.name2, url: getCharacterAvatar(context.characterId) }];
+    }
+
+    const group = context.groups.find(x => x.id === context.groupId);
+    const members = Array.isArray(group?.members) ? group.members : [];
+    const disabledMembers = Array.isArray(group?.disabled_members) ? group.disabled_members : [];
+
+    return members
+        .filter(avatar => !disabledMembers.includes(avatar))
+        .slice(0, max)
+        .map(avatar => ({
+            name: context.characters.find(c => c.avatar === avatar)?.name || 'character',
+            url: formatCharacterAvatar(avatar),
+        }));
+}
+
+/**
+ * Builds a "Characters in this scene" text block naming every non-muted group member and
+ * their full card description, so a multi-character prompt (see needsRosterContext) isn't
+ * limited to whichever single member happens to be the current speaker. Group card
+ * combining (getCharacterCardFields) only does this when the group's generation_mode is
+ * APPEND/APPEND_DISABLED - this covers the default SWAP mode too.
+ *
+ * {{char}}/{{user}} inside each member's own description are replaced with that member's
+ * own name / the persona name - the normal substituteParams() always resolves {{char}} to
+ * the *current* speaker, which would be wrong for every other member's self-description.
+ *
+ * Returns null in solo chats (the existing card/persona blocks already cover the single
+ * character) or if the group has no eligible members.
+ * @returns {string | null}
+ */
+export function buildRosterContextBlock() {
+    const context = getContext();
+
+    if (!context.groupId) {
+        return null;
+    }
+
+    const group = context.groups.find(x => x.id === context.groupId);
+    const members = Array.isArray(group?.members) ? group.members : [];
+    const disabledMembers = Array.isArray(group?.disabled_members) ? group.disabled_members : [];
+    const userName = context.name1 || 'the user';
+
+    const entries = members
+        .filter(avatar => !disabledMembers.includes(avatar))
+        .map(avatar => context.characters.find(c => c.avatar === avatar))
+        .filter(Boolean)
+        .map(character => {
+            const description = (character.description || '(no description)')
+                .replace(/\{\{char\}\}/gi, character.name)
+                .replace(/\{\{user\}\}/gi, userName);
+            return `${character.name}:\n${description}`;
+        });
+
+    if (entries.length === 0) {
+        return null;
+    }
+
+    return `Characters in this scene:\n\n${entries.join('\n\n')}`;
+}
+
+/**
  * Fetches a data URL and normalizes it: downsizes if it's over the 2MB threshold, or
  * re-encodes as JPEG if its mime type isn't one of the widely-accepted image types.
  * @param {string} url
@@ -129,12 +227,16 @@ async function fetchAndNormalize(url) {
  * Collects reference images (as normalized data URLs) for the requested targets.
  * Individual fetch failures are logged and skipped rather than thrown - a missing avatar
  * must not abort the whole generation. Character avatars are ordered before the user
- * avatar, and the combined list is truncated to `max`.
+ * avatar, and the combined list is truncated to `max` - except when `targets.user` is set,
+ * in which case one slot is reserved for the persona so it can't be pushed out by a large
+ * character list.
  * @param {{user: boolean, char: boolean}} targets
  * @param {number} max
+ * @param {number} [mode] generationMode enum value. CAST uses roster order (the full cast,
+ *   including members who haven't spoken yet) instead of the default recency order.
  * @returns {Promise<Array<{label: string, dataUrl: string}>>}
  */
-export async function collectReferenceImages(targets, max) {
+export async function collectReferenceImages(targets, max, mode) {
     if (max <= 0) {
         return [];
     }
@@ -144,10 +246,18 @@ export async function collectReferenceImages(targets, max) {
     const candidates = [];
 
     if (targets.char) {
-        const charUrls = resolveCharacterAvatarUrls(max);
-        const charName = context.groupId ? null : context.name2;
-        for (const url of charUrls) {
-            candidates.push({ label: charName || 'character', url });
+        const charMax = targets.user ? Math.max(max - 1, 0) : max;
+
+        if (mode === generationMode.CAST) {
+            for (const member of resolveGroupRosterAvatars(charMax)) {
+                candidates.push({ label: member.name, url: member.url });
+            }
+        } else {
+            const charUrls = resolveCharacterAvatarUrls(charMax);
+            const charName = context.groupId ? null : context.name2;
+            for (const url of charUrls) {
+                candidates.push({ label: charName || 'character', url });
+            }
         }
     }
 

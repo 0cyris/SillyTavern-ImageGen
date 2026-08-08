@@ -57,6 +57,35 @@ Without this plugin, OpenRouter generation falls back to the built-in
 If the Connection Manager extension is disabled, or the selected profile fails, generation
 falls back automatically to the chat connection with a warning toast.
 
+## Cast mode (`/imagine cast`)
+
+A group/lineup shot: every character currently in the scene, together, on a plain neutral
+background — a party portrait or "who's in this story" reference sheet.
+
+- **Group chats**: the cast is every non-muted group member plus your persona. The
+  prompt-generation LLM is given each member's name and full card description explicitly
+  (not just the current speaker's) — SillyTavern only auto-combines group member cards when
+  the group's "Generation Mode" is set to Join/Join (Disabled Included), and most groups
+  default to Swap, which this mode doesn't depend on.
+- **Solo (GM/narrator) chats work too.** The cast is your persona plus whichever NPCs are
+  actively present in the recent conversation. There's no roster to draw from there, so
+  their appearance comes from chat history and the prompt instruction rather than a card.
+- **The active character is only drawn if they're actually in the scene.** The prompt asks
+  the LLM to include the current character only if they're a participant, not if they're
+  narrating/gamemastering/voicing NPCs from the outside — so a "Gamemaster"-style card
+  driving a solo game is correctly left out of its own group portrait. This is judged by
+  the LLM from context (there's no structured "this is a narrator" flag), so an unusually
+  written GM card could still slip through.
+- Forces a landscape aspect ratio, and isn't prefixed with any single character's
+  positive/negative prompt — a lineup shouldn't be tagged with one person's tags.
+- The standard character-card block (normally injected for every mode) is skipped for Cast
+  specifically — it describes "the current character," which in a GM-driven chat is the
+  narrator, and its content tends to be role/lore text rather than a physical description
+  that would otherwise leak worldbuilding into the image prompt.
+
+Available from `/imagine cast`, the wand menu ("The Cast"), and interactive triggers like
+"send me a picture of the cast/group/party/everyone".
+
 ## Reference images (persona / character avatars)
 
 Two independent features send avatars as visual reference. Neither implies the other — you
@@ -78,9 +107,11 @@ can enable one, both, or neither, with separate include-checkboxes and limits ea
 
 Which avatars are attached is decided automatically by generation mode: `me`/user modes use
 the persona avatar, `you`/`face` modes use the character avatar, scene-wide modes (`scene`,
-`last`, free mode) use both, and `background` uses neither. In group chats, avatars are
-collected from the most recent distinct speakers, capped at the smaller of the model's own
-limit and your configured maximum.
+`last`, `cast`, free mode) use both, and `background` uses neither. In group chats, avatars
+are normally collected from the most recent distinct speakers — except `cast`, which uses
+the full non-muted roster in roster order instead of recency, and always reserves a slot for
+the persona so a large group can't crowd it out. All of this is capped at the smaller of the
+model's own limit and your configured maximum.
 
 ### Why only OpenRouter?
 

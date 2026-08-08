@@ -1,6 +1,6 @@
 import { getContext } from '../../../../extensions.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
-import { collectReferenceImages, getReferenceTargets } from './reference-images.js';
+import { collectReferenceImages, getReferenceTargets, needsRosterContext, buildRosterContextBlock, isCastMode } from './reference-images.js';
 
 /**
  * Whether the Connection Manager extension is enabled and a prompt-generation profile is selected.
@@ -44,7 +44,13 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     if (settings.prompt_include_card || settings.prompt_include_persona) {
         const fields = context.getCharacterCardFields();
 
-        if (settings.prompt_include_card) {
+        // Cast mode skips the standard card block. It describes "the current character",
+        // which in a solo GM/narrator-driven chat IS the narrator - its card is typically
+        // role/lore text ("frames scenes, voices every NPC...") rather than a physical
+        // description, and injecting it was pulling worldbuilding into the image prompt and
+        // tempting the LLM to draw the narrator as a person. The roster block (group chats)
+        // and chat history already cover who's actually present.
+        if (settings.prompt_include_card && !isCastMode(generationType)) {
             const parts = [];
             if (fields.description) parts.push(`Description:\n${fields.description}`);
             if (fields.personality) parts.push(`Personality:\n${fields.personality}`);
@@ -56,6 +62,14 @@ export async function buildContextMessages(quietPrompt, generationType, settings
 
         if (settings.prompt_include_persona && fields.persona) {
             messages.push({ role: 'system', content: context.substituteParams(`{{user}}'s persona:\n${fields.persona}`) });
+        }
+    }
+
+    if (needsRosterContext(generationType)) {
+        const rosterBlock = buildRosterContextBlock();
+        if (rosterBlock) {
+            console.debug(`ImageGen: roster context block is ${rosterBlock.length} chars`);
+            messages.push({ role: 'system', content: rosterBlock });
         }
     }
 
@@ -93,7 +107,7 @@ export async function buildContextMessages(quietPrompt, generationType, settings
             user: intrinsic.user && !!settings.prompt_reference_user,
             char: intrinsic.char && !!settings.prompt_reference_char,
         };
-        const images = await collectReferenceImages(targets, Number(settings.prompt_reference_max) || 0);
+        const images = await collectReferenceImages(targets, Number(settings.prompt_reference_max) || 0, generationType);
 
         if (images.length > 0) {
             finalContent = [
