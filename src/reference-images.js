@@ -40,15 +40,6 @@ export function needsRosterContext(mode) {
 }
 
 /**
- * Whether a generation mode is the Cast (group lineup) mode.
- * @param {number} mode generationMode enum value (see index.js)
- * @returns {boolean}
- */
-export function isCastMode(mode) {
-    return mode === generationMode.CAST;
-}
-
-/**
  * Which avatars are intrinsically relevant to a generation mode, independent of any
  * reference-image settings. Callers AND this with their own include-user/include-char
  * toggles.

@@ -1,0 +1,15 @@
+{
+    "name": "sillytavern-imagegen",
+    "private": true,
+    "type": "module",
+    "description": "Build tooling for SillyTavern-ImageGen. The extension itself is plain JS with no build step - this only exists to bundle sillytavern-utils-lib's buildPrompt() for prompt-generation.js.",
+    "scripts": {
+        "build": "node scripts/build-prompt-builder.mjs"
+    },
+    "dependencies": {
+        "sillytavern-utils-lib": "^1.0.64"
+    },
+    "devDependencies": {
+        "esbuild": "^0.25.0"
+    }
+}

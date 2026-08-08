@@ -31,6 +31,21 @@ a hardcoded `.jpg` extension regardless of its actual format.
 3. Reload SillyTavern. Your existing settings from the built-in extension are copied over
    automatically on first load (one-time, non-destructive — your original settings are untouched).
 
+## Building (only needed if you're modifying prompt generation)
+
+Chat Completion prompt assembly is built on
+[`sillytavern-utils-lib`](https://www.npmjs.com/package/sillytavern-utils-lib)'s `buildPrompt()`,
+bundled ahead of time into the committed `dist/prompt-builder.js` — end users don't need
+Node.js or a build step, just the plain copy-the-folder install above. Only rebuild if you're
+changing `src/build/prompt-builder-entry.js` or bumping the library version:
+
+```
+npm install
+npm run build
+```
+
+This regenerates `dist/prompt-builder.js`; commit the result alongside your source change.
+
 ## OpenRouter server plugin (optional but recommended for OpenRouter)
 
 Without this plugin, OpenRouter generation falls back to the built-in
@@ -70,13 +85,11 @@ top_p, penalties, reasoning effort, etc.) apply too. If a preset has extension-p
 wired up (Summarize, Vectors, Vector Storage's data bank, Smart Context/ChromaDB), those are
 picked up from whichever of those extensions are active, same as normal chat generation.
 
-Not supported: Author's Note and character/group depth-prompts. Both live outside a
-preset's ordered prompt list entirely (position-anchored by depth or by World Info
-boundaries rather than a slot the preset's order references) and are about roleplay
-continuity rather than the preset's own formatting. When there's no preset to order by (no
+Author's Note and character/group depth-prompts are included too, inserted at their
+configured depth same as normal chat generation. When there's no preset to order by (no
 preset assigned to the profile, or a text-completion profile — whose "preset" is an
 instruct/context preset with no Prompt Manager concept at all), generation falls back to a
-fixed sequence: system instruction, card, persona, World Info, history, instruction.
+fixed sequence instead: system instruction, card, persona, World Info, history, instruction.
 
 **If generation isn't picking up your Completion Preset at all** (neither sampling nor
 prompt content): a profile's assigned preset is a one-time snapshot of whichever Completion

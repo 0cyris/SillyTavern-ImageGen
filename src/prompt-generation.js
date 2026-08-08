@@ -1,6 +1,7 @@
 import { getContext } from '../../../../extensions.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
-import { collectReferenceImages, getReferenceTargets, needsRosterContext, buildRosterContextBlock, isCastMode, resolveActiveCharacterName } from './reference-images.js';
+import { collectReferenceImages, getReferenceTargets, needsRosterContext, buildRosterContextBlock, resolveActiveCharacterName } from './reference-images.js';
+import { buildPrompt } from '../dist/prompt-builder.js';
 
 /**
  * Whether the Connection Manager extension is enabled and a prompt-generation profile is selected.
@@ -21,34 +22,12 @@ export function isProfilePromptAvailable(settings) {
     return true;
 }
 
-// The Chat Completion prompt-order character_id ST always uses for the "global" (non-
-// per-character) ordering - the CC prompt manager isn't actually per-character (promptManager
-// is initialized with dummyId: 100001 for the 'global' lookup strategy CC presets use). Falls
-// back to the last entry in prompt_order if 100001 isn't present, matching the reference
-// implementation this is modeled on (sillytavern-utils-lib's buildPrompt, used by zTracker).
-const CC_PROMPT_ORDER_CHARACTER_ID = 100001;
-
-// "Extension prompt" identifiers a preset's own prompt_order can reference - populated by
-// other active extensions (Summarize, Vectors, Vector Storage's data bank, ChromaDB/Smart
-// Context) via context.extensionPrompts. Included for parity with how SillyTavern's own
-// Prompt Manager resolves these, in case a preset was built assuming they're present.
-const EXTENSION_PROMPT_KEYS = {
-    summary: '1_memory',
-    authorsNote: '2_floating_prompt',
-    vectorsMemory: '3_vectors',
-    vectorsDataBank: '4_vectors_data_bank',
-    smartContext: 'chromadb',
-};
-
-// extension_prompt_roles from script.js (SYSTEM/USER/ASSISTANT), inlined rather than
-// imported since it's three stable numeric constants and not worth another import path.
-const EXTENSION_PROMPT_ROLE_NAMES = ['system', 'user', 'assistant'];
-
 /**
- * Gathers every "ingredient" a Chat Completion preset's standard prompt-order identifiers
- * can resolve to, each already gated by this extension's own settings toggles so both the
- * order-driven and fixed-order assembly paths respect them identically - an ingredient being
- * empty/absent doubles as "don't produce a message for this identifier".
+ * Gathers card/persona/World Info/history content for the text-completion fallback path,
+ * gated by this extension's own settings toggles - an ingredient being empty/absent doubles
+ * as "don't produce a message for it". Chat Completion profiles don't use this at all (see
+ * buildViaLibrary); text-completion presets have no Prompt Manager concept to order by, so
+ * they get this simpler fixed sequence instead.
  * @param {any} context
  * @param {number} generationType
  * @param {any} settings
@@ -56,25 +35,17 @@ const EXTENSION_PROMPT_ROLE_NAMES = ['system', 'user', 'assistant'];
  */
 async function gatherIngredients(context, generationType, settings) {
     const ingredients = {
-        description: '', personality: '', scenario: '', persona: '', mesExamples: '',
+        description: '', personality: '', scenario: '', persona: '',
         rosterBlock: null, worldInfoBefore: '', worldInfoAfter: '', historyMessages: [],
-        extensionPrompts: {},
     };
 
     if (settings.prompt_include_card || settings.prompt_include_persona) {
         const fields = context.getCharacterCardFields();
 
-        // Cast mode skips the standard card fields. They describe "the current character",
-        // which in a solo GM/narrator-driven chat IS the narrator - its card is typically
-        // role/lore text ("frames scenes, voices every NPC...") rather than a physical
-        // description, and injecting it was pulling worldbuilding into the image prompt and
-        // tempting the LLM to draw the narrator as a person. The roster block (group chats)
-        // and chat history already cover who's actually present.
-        if (settings.prompt_include_card && !isCastMode(generationType)) {
+        if (settings.prompt_include_card) {
             ingredients.description = fields.description || '';
             ingredients.personality = fields.personality || '';
             ingredients.scenario = fields.scenario || '';
-            ingredients.mesExamples = fields.mesExamples || '';
         }
 
         if (settings.prompt_include_persona && fields.persona) {
@@ -108,7 +79,6 @@ async function gatherIngredients(context, generationType, settings) {
 
     const historyDepth = Number(settings.prompt_history_depth) || 0;
     if (historyDepth > 0 && Array.isArray(context.chat)) {
-        // Substitution is applied by the caller once these ingredients are consumed, not here.
         ingredients.historyMessages = context.chat
             .filter(m => !m.is_system)
             .slice(-historyDepth)
@@ -119,55 +89,7 @@ async function gatherIngredients(context, generationType, settings) {
             }));
     }
 
-    for (const [identifier, extensionKey] of Object.entries(EXTENSION_PROMPT_KEYS)) {
-        const prompt = context.extensionPrompts?.[extensionKey];
-        if (prompt?.value) {
-            ingredients.extensionPrompts[identifier] = {
-                role: EXTENSION_PROMPT_ROLE_NAMES[prompt.role] ?? 'system',
-                content: prompt.value,
-            };
-        }
-    }
-
     return ingredients;
-}
-
-/**
- * Resolves a Chat Completion prompt-order identifier that maps to live chat/character state
- * (a "marker" in ST's own Prompt Manager terminology) to a {role, content} message, using
- * precomputed ingredients. Returns null if the identifier is a recognized marker with
- * nothing to say (e.g. no persona set), or undefined if the identifier isn't a marker at all
- * (caller should look it up as literal preset content instead).
- * @param {string} identifier
- * @param {object} ingredients
- * @param {(text: string) => string} substitute
- * @returns {{role: string, content: string} | null | undefined}
- */
-function resolveMarkerContent(identifier, ingredients, substitute) {
-    switch (identifier) {
-        case 'worldInfoBefore':
-            return ingredients.worldInfoBefore ? { role: 'system', content: ingredients.worldInfoBefore } : null;
-        case 'worldInfoAfter':
-            return ingredients.worldInfoAfter ? { role: 'system', content: ingredients.worldInfoAfter } : null;
-        case 'charDescription':
-            return ingredients.description ? { role: 'system', content: `Description:\n${ingredients.description}` } : null;
-        case 'charPersonality':
-            return ingredients.personality ? { role: 'system', content: `Personality:\n${ingredients.personality}` } : null;
-        case 'scenario':
-            return ingredients.scenario ? { role: 'system', content: `Scenario:\n${ingredients.scenario}` } : null;
-        case 'personaDescription':
-            return ingredients.persona ? { role: 'system', content: substitute(`{{user}}'s persona:\n${ingredients.persona}`) } : null;
-        case 'dialogueExamples':
-            return ingredients.mesExamples ? { role: 'system', content: ingredients.mesExamples } : null;
-        case 'summary':
-        case 'authorsNote':
-        case 'vectorsMemory':
-        case 'vectorsDataBank':
-        case 'smartContext':
-            return ingredients.extensionPrompts[identifier] ?? null;
-        default:
-            return undefined;
-    }
 }
 
 function formatHistoryMessage(message, substitute) {
@@ -175,90 +97,9 @@ function formatHistoryMessage(message, substitute) {
 }
 
 /**
- * Walks a Chat Completion preset's own prompt_order, resolving each entry to a message:
- * either live chat/character state (see resolveMarkerContent) or the preset's own literal
- * prompt text (Main Prompt, Post-History Instructions, custom entries). This is what gives a
- * profile's assigned preset real effect beyond sampling settings - ChatCompletionService
- * never reads prompts/prompt_order (confirmed in the host's presetToGeneratePayload), so
- * without this, a preset built specifically for image-prompt generation would silently lose
- * everything except its temperature/top_p/etc, even though its own prompt content is often
- * the entire reason a dedicated preset was assigned to the profile in the first place.
- *
- * Modeled on sillytavern-utils-lib's buildPrompt() (used by the zTracker extension) for its
- * chat-completion branch, reimplemented locally rather than taken as a dependency since this
- * extension has no build step - everything here is standard context API, same as the rest of
- * this file. Deliberately narrower in two places: World Info is scanned in dry-run mode (a
- * quiet background call shouldn't tick WI sticky/cooldown/timed-effect state the way a real
- * chat turn does), and Author's Note / character-and-group depth-prompts are not supported -
- * both live outside the ordered walk entirely (position-anchored insertion relative to World
- * Info boundaries or message-count depth, rather than an identifier the order references)
- * and are about roleplay continuity/memory rather than the prompt's own formatting, which is
- * what a preset built for this task actually controls.
- * @param {object} preset
- * @param {object} ingredients
- * @param {(text: string) => string} substitute
- * @returns {Array<{role: string, content: string}>}
- */
-function buildOrderDrivenMessages(preset, ingredients, substitute) {
-    const messages = [];
-    const order = preset.prompt_order.find(o => o.character_id === CC_PROMPT_ORDER_CHARACTER_ID)?.order
-        ?? preset.prompt_order[preset.prompt_order.length - 1]?.order;
-    if (!Array.isArray(order)) {
-        return messages;
-    }
-
-    const promptsById = new Map((preset.prompts ?? []).map(p => [p.identifier, p]));
-    let rosterBlockInserted = false;
-
-    for (const entry of order) {
-        if (entry.enabled === false) {
-            continue;
-        }
-
-        if (entry.identifier === 'chatHistory') {
-            messages.push(...ingredients.historyMessages.map(m => formatHistoryMessage(m, substitute)));
-            continue;
-        }
-
-        // Not a standard ST identifier - this extension's own "who's actually in this scene"
-        // block for multi-character modes, anchored near character info when that identifier
-        // exists in the order. See the fallback insertion below for presets that omit it.
-        if (entry.identifier === 'charDescription' && ingredients.rosterBlock) {
-            messages.push({ role: 'system', content: ingredients.rosterBlock });
-            rosterBlockInserted = true;
-        }
-
-        const marker = resolveMarkerContent(entry.identifier, ingredients, substitute);
-        if (marker !== undefined) {
-            if (marker) {
-                messages.push(marker);
-            }
-            continue;
-        }
-
-        const prompt = promptsById.get(entry.identifier);
-        if (!prompt || prompt.enabled === false || prompt.marker || !prompt.content) {
-            continue;
-        }
-        messages.push({ role: prompt.role || 'system', content: substitute(prompt.content) });
-    }
-
-    // A preset that never references 'charDescription' (some minimal/custom presets don't)
-    // would otherwise silently drop the roster block - it's not something a preset author
-    // could have known to structure around, so make sure it lands somewhere rather than
-    // vanishing outright. Placed just before the final instruction is appended by the caller.
-    if (ingredients.rosterBlock && !rosterBlockInserted) {
-        messages.push({ role: 'system', content: ingredients.rosterBlock });
-    }
-
-    return messages;
-}
-
-/**
- * Fixed-sequence fallback used when there's no Chat Completion preset to order by (no preset
- * assigned to the profile, or a text-completion profile, whose "preset" is an instruct/
- * context preset with no Prompt Manager concept at all). Same ingredients, same settings-
- * gated inclusion as the order-driven path, just always in this fixed order.
+ * Fixed-sequence assembly used for text-completion profiles, whose "preset" is an instruct/
+ * context preset with no Prompt Manager concept at all - there's no order to walk, so this
+ * always produces the same shape: card, persona, roster block, World Info, history.
  * @param {object} ingredients
  * @param {(text: string) => string} substitute
  * @returns {Array<{role: string, content: string}>}
@@ -279,7 +120,6 @@ function buildFixedOrderMessages(ingredients, substitute) {
     }
 
     if (ingredients.rosterBlock) {
-        console.debug(`ImageGen: roster context block is ${ingredients.rosterBlock.length} chars`);
         messages.push({ role: 'system', content: ingredients.rosterBlock });
     }
 
@@ -294,14 +134,80 @@ function buildFixedOrderMessages(ingredients, substitute) {
 }
 
 /**
+ * Assembles the message body for a Chat Completion profile via sillytavern-utils-lib's
+ * buildPrompt() (bundled at dist/prompt-builder.js - see scripts/build-prompt-builder.mjs).
+ * Used whether or not the profile has an assigned preset: buildPrompt's own internal
+ * fallback (no presetName) calls ST's real prepareOpenAIMessages, so both cases go through
+ * the same maintained implementation rather than a hand-rolled approximation of either.
+ *
+ * ignoreCharacterFields is deliberately never used here, even for Cast mode - the library
+ * couples "skip the character card" and "skip the persona" into one flag with no way to
+ * keep persona while dropping card, which Cast mode's narrator-exclusion previously relied
+ * on. Cast mode instead leans entirely on its own template instruction ("only include
+ * {{char}} if an active participant in the scene, not narrating it").
+ * @param {string} presetName Profile's assigned preset name, or '' / undefined for none.
+ * @param {number} generationType
+ * @param {any} settings
+ * @param {any} context
+ * @returns {Promise<Array<{role: string, content: string}>>}
+ */
+async function buildViaLibrary(presetName, generationType, settings, context) {
+    const historyDepth = Number(settings.prompt_history_depth) || 0;
+
+    // messageIndexesBetween looks like the documented way to emulate prompt_history_depth,
+    // but any non-zero `start` silently drops chat history from the result entirely
+    // (confirmed live: {start:20,end:24} against a 25-message chat returns 8 messages, all
+    // role "system", zero history) regardless of `end` - a bug in the library itself, not a
+    // usage error (the full-range/omitted case works correctly). Ask for everything instead
+    // and trim afterwards.
+    const { result, warnings } = await buildPrompt('openai', {
+        presetName: presetName || undefined,
+        maxContext: 'preset',
+        includeNames: !!context.groupId,
+        ignoreCharacterFields: !(settings.prompt_include_card || settings.prompt_include_persona),
+        ignoreWorldInfo: !settings.prompt_include_wi,
+    });
+
+    for (const warning of warnings ?? []) {
+        console.warn('ImageGen:', warning);
+    }
+
+    // Entries built from an actual chat message carry `source` (the original message
+    // object); everything else (main/jailbreak/persona/WI/etc. prompt-manager entries) does
+    // not. That's a reliable way to identify "history" post hoc and trim it to the last
+    // historyDepth messages, since messageIndexesBetween can't be trusted to do it up front.
+    const totalHistory = result.reduce((n, m) => n + (m.source ? 1 : 0), 0);
+    let historySeen = 0;
+    const trimmed = result.filter((m) => {
+        if (!m.source) {
+            return true;
+        }
+        historySeen += 1;
+        return totalHistory - historySeen < historyDepth;
+    });
+
+    const messages = trimmed.map(m => ({ role: m.role, content: m.content }));
+
+    if (needsRosterContext(generationType)) {
+        const rosterBlock = buildRosterContextBlock();
+        if (rosterBlock) {
+            // buildPrompt's output carries no per-message identifier to anchor on (unlike
+            // the hand-rolled version this replaced) - insert right after the first message
+            // (typically Main Prompt) rather than trying to locate "near character info".
+            messages.splice(Math.min(1, messages.length), 0, { role: 'system', content: rosterBlock });
+        }
+    }
+
+    return messages;
+}
+
+/**
  * Assembles the message array sent to the dedicated image-prompt connection profile.
  * The *active chat's* prompt-manager entries and jailbreak text are NOT included here -
- * that's the entire point of using a separate profile. If the profile's own assigned Chat
- * Completion preset has its own Prompt Manager entries (Main Prompt, Post-History
- * Instructions, custom entries), those ARE included, positioned exactly where that preset's
- * own prompt_order puts them relative to World Info/card/persona/history - a dedicated
- * preset built for this task is exactly what a Connection Profile is for. Falls back to a
- * fixed sequence when there's no preset to order by (see buildFixedOrderMessages).
+ * that's the entire point of using a separate profile. For a Chat Completion profile, the
+ * *profile's own* assigned preset is used in full (see buildViaLibrary) - a dedicated preset
+ * built for this task is exactly what a Connection Profile is for. Text-completion profiles
+ * get a simpler fixed sequence instead (see buildFixedOrderMessages).
  * @param {string} quietPrompt The instruction text for this generation mode (already formatted by getQuietPrompt)
  * @param {number} generationType The generationMode enum value
  * @param {any} settings Fork settings object (S)
@@ -315,22 +221,17 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     // {{char}} normally resolves from the ambient name2, which SillyTavern only sets for the
     // duration of a specific member's turn inside the group-generation loop - everywhere else
     // in a group chat (including this out-of-band call) it's '', so {{char}} would silently
-    // resolve to nothing. Pin an explicit name so every substitution below is reliable.
+    // resolve to nothing. Pin an explicit name so every substitution below (our own content -
+    // not what buildPrompt resolves internally for a preset's own entries) is reliable.
     const nameOverrides = { name1Override: context.name1, name2Override: resolveActiveCharacterName() };
     const substitute = (text) => context.substituteParams(text, nameOverrides);
 
-    const ingredients = await gatherIngredients(context, generationType, settings);
-
-    // Chat Completion profiles only - a text-completion profile's "preset" is an instruct/
-    // context preset with no Prompt Manager entries, a different concept entirely.
     const profile = ConnectionManagerRequestService.getProfile(settings.prompt_profile);
-    const preset = profile?.mode === 'cc' && profile.preset
-        ? context.getPresetManager?.('openai')?.getCompletionPresetByName(profile.preset)
-        : null;
+    const isChatCompletion = profile?.mode === 'cc';
 
-    const bodyMessages = preset && Array.isArray(preset.prompts) && Array.isArray(preset.prompt_order)
-        ? buildOrderDrivenMessages(preset, ingredients, substitute)
-        : buildFixedOrderMessages(ingredients, substitute);
+    const bodyMessages = isChatCompletion
+        ? await buildViaLibrary(profile.preset, generationType, settings, context)
+        : buildFixedOrderMessages(await gatherIngredients(context, generationType, settings), substitute);
 
     const messages = [];
 
