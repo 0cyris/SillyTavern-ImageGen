@@ -21,10 +21,85 @@ export function isProfilePromptAvailable(settings) {
     return true;
 }
 
+// The Chat Completion prompt-order character_id ST always uses for the "global" (non-
+// per-character) ordering - the CC prompt manager isn't actually per-character, unlike the
+// legacy per-character 100000 entry some presets still carry (openai.js: promptManager is
+// initialized with `dummyId: 100001` for the 'global' lookup strategy CC presets use).
+const CC_PROMPT_ORDER_CHARACTER_ID = 100001;
+
+// Prompt Manager entries with no literal content of their own - they're resolved from live
+// chat state (character card, persona, World Info, history) at generation time. This
+// extension already builds its own equivalents of all of these elsewhere in
+// buildContextMessages, so they're skipped here rather than left blank.
+const MARKER_IDENTIFIERS = new Set([
+    'worldInfoBefore', 'worldInfoAfter', 'charDescription', 'charPersonality',
+    'scenario', 'personaDescription', 'dialogueExamples', 'chatHistory',
+]);
+
+/**
+ * Reads a Chat Completion preset's own Prompt Manager entries (Main Prompt, Post-History
+ * Instructions, any custom entries) and returns them as plain messages, split into what
+ * belongs before vs after the preset's own chat-history marker position.
+ *
+ * ConnectionManagerRequestService/createGenerationParameters never read a preset's
+ * prompts/prompt_order - only sampling settings (temperature, top_p, etc, confirmed via
+ * ChatCompletionService.presetToGeneratePayload in the host) - so without this, a profile's
+ * assigned preset silently loses all of its own prompt content, even when that content is
+ * the entire reason the preset was built. This reimplements just enough of what
+ * populateChatCompletion (openai.js) does for literal-content entries, self-contained, with
+ * no host-file changes and no global oai_settings mutation.
+ * @param {string} presetName
+ * @param {(text: string) => string} substitute Macro substitution function (name overrides already bound)
+ * @returns {{before: Array<{role: string, content: string}>, after: Array<{role: string, content: string}>}}
+ */
+function resolvePresetPromptEntries(presetName, substitute) {
+    const empty = { before: [], after: [] };
+    if (!presetName) {
+        return empty;
+    }
+
+    const context = getContext();
+    const preset = context.getPresetManager?.('openai')?.getCompletionPresetByName(presetName);
+    if (!preset || !Array.isArray(preset.prompts) || !Array.isArray(preset.prompt_order)) {
+        return empty;
+    }
+
+    const order = preset.prompt_order.find(o => o.character_id === CC_PROMPT_ORDER_CHARACTER_ID)?.order;
+    if (!Array.isArray(order)) {
+        return empty;
+    }
+
+    const promptsById = new Map(preset.prompts.map(p => [p.identifier, p]));
+    const before = [];
+    const after = [];
+    let pastHistory = false;
+
+    for (const entry of order) {
+        if (entry.identifier === 'chatHistory') {
+            pastHistory = true;
+            continue;
+        }
+        if (MARKER_IDENTIFIERS.has(entry.identifier) || entry.enabled === false) {
+            continue;
+        }
+        const prompt = promptsById.get(entry.identifier);
+        if (!prompt || prompt.enabled === false || prompt.marker || !prompt.content) {
+            continue;
+        }
+        const message = { role: prompt.role || 'system', content: substitute(prompt.content) };
+        (pastHistory ? after : before).push(message);
+    }
+
+    return { before, after };
+}
+
 /**
  * Assembles the message array sent to the dedicated image-prompt connection profile.
- * The chat preset's prompt-manager entries and jailbreak text are NOT included here -
- * that's the entire point of using a separate profile. Full chat context (card, persona,
+ * The *active chat's* prompt-manager entries and jailbreak text are NOT included here -
+ * that's the entire point of using a separate profile. If the profile's own assigned
+ * Completion Preset has its own Prompt Manager entries (Main Prompt, Post-History
+ * Instructions, custom entries), those ARE included - a dedicated preset built for this
+ * task is exactly what a Connection Profile is for. Full chat context (card, persona,
  * history) is still included so the LLM knows what scene to describe.
  * @param {string} quietPrompt The instruction text for this generation mode (already formatted by getQuietPrompt)
  * @param {number} generationType The generationMode enum value
@@ -43,6 +118,15 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     // resolve to nothing. Pin an explicit name so every substitution below is reliable.
     const nameOverrides = { name1Override: context.name1, name2Override: resolveActiveCharacterName() };
     const substitute = (text) => context.substituteParams(text, nameOverrides);
+
+    // Chat Completion profiles only - a text-completion profile's "preset" is an instruct/
+    // context preset with no Prompt Manager entries, a different concept entirely.
+    const profile = ConnectionManagerRequestService.getProfile(settings.prompt_profile);
+    const presetPrompts = profile?.mode === 'cc' && profile.preset
+        ? resolvePresetPromptEntries(profile.preset, substitute)
+        : { before: [], after: [] };
+
+    messages.push(...presetPrompts.before);
 
     if (settings.prompt_system) {
         messages.push({ role: 'system', content: substitute(settings.prompt_system) });
@@ -109,6 +193,10 @@ export async function buildContextMessages(quietPrompt, generationType, settings
             messages.push({ role, content: `${namePrefix}${substitute(message.mes ?? '')}` });
         }
     }
+
+    // e.g. Post-History Instructions - positioned after chat history in the preset's own
+    // order, same as it would be through the normal Prompt Manager pipeline.
+    messages.push(...presetPrompts.after);
 
     // The image-prompt instruction is always sent as the final USER message, not a system/OOC turn.
     // {{char}}/{{user}}/etc. macros in the template must be resolved here - nothing downstream

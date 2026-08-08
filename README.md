@@ -47,8 +47,7 @@ Without this plugin, OpenRouter generation falls back to the built-in
 ## Using a Connection Profile for prompt generation
 
 1. Create a Connection Profile (via the Connection Manager extension) pointing at whichever
-   model/preset you want writing image prompts — ideally a clean preset with no jailbreak or
-   prompt-manager entries that would fight the image instruction.
+   model/preset you want writing image prompts.
 2. In this extension's settings, under "Prompt Generation", select that profile.
 3. Optionally add a system instruction (e.g. *"Output only comma-separated tags, no prose."*)
    and tune history depth / included context.
@@ -57,13 +56,25 @@ Without this plugin, OpenRouter generation falls back to the built-in
 If the Connection Manager extension is disabled, or the selected profile fails, generation
 falls back automatically to the chat connection with a warning toast.
 
-**If generation isn't picking up your Completion Preset** (only the model/connection seem to
-apply): a profile's assigned preset is a one-time snapshot of whichever Completion Preset was
-selected in the main UI *at the moment you created or last updated the profile* — it isn't
-kept in sync. If you didn't have one selected then, or it's been renamed/deleted since, the
-profile silently has no preset and generation falls back to raw model defaults. Fix: select
-the desired preset in the main UI, then click **Update** on the profile in Connection
-Manager. Check the browser console for an `ImageGen:` warning confirming which case applies.
+**Your *active chat's* preset/jailbreak is never used** — that's the entire reason this
+feature exists (see the top of this README). **The profile's own assigned Completion
+Preset is different: its Prompt Manager entries (Main Prompt, Post-History Instructions,
+any custom entries) *are* included**, positioned the same way they'd sit relative to chat
+history in that preset. Build a preset specifically for this task (a "Task" preset with its
+own Main Prompt tuned for image-prompt generation) and assign it to the profile — that's
+the intended way to shape output beyond the "System instruction" field above. Sampling
+settings (temperature, top_p, penalties, reasoning effort, etc.) from the preset apply too.
+Marker entries with no literal content of their own (World Info, character card, persona,
+chat history) are skipped — this extension already builds its own equivalents of those.
+
+**If generation isn't picking up your Completion Preset at all** (neither sampling nor
+prompt content): a profile's assigned preset is a one-time snapshot of whichever Completion
+Preset was selected in the main UI *at the moment you created or last updated the profile*
+— it isn't kept in sync. If you didn't have one selected then, or it's been renamed/deleted
+since, the profile silently has no preset and generation falls back to raw model defaults.
+Fix: select the desired preset in the main UI, then click **Update** on the profile in
+Connection Manager. Check the browser console for an `ImageGen:` warning confirming which
+case applies.
 
 ## Cast mode (`/imagine cast`)
 
