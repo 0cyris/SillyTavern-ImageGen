@@ -1,0 +1,32 @@
+name: Verify dist/ is up to date
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  verify-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Fail if dist/ doesn't match a fresh build
+        run: |
+          if ! git diff --quiet -- dist/; then
+            echo "::error::dist/prompt-builder.js is out of date. Run 'npm install && npm run build' and commit the result."
+            git diff --stat -- dist/
+            exit 1
+          fi
