@@ -3079,6 +3079,16 @@ async function generatePicture(initiator, args, trigger, message, callback) {
         return;
     }
 
+    // No character or group chat open (e.g. still on the welcome screen) - context.chat and
+    // name2 sit at their empty-app defaults (a placeholder "hint" message, systemUserName)
+    // rather than throwing, so without this check every downstream consumer (prompt
+    // templates, {{char}}/{{user}} macros, chat history) would silently build a prompt out
+    // of that placeholder state instead of failing loudly.
+    if (this_chid === undefined && !selected_group) {
+        toastr.warning('Open a character or group chat before generating an image.', 'Image Generation');
+        return;
+    }
+
     ensureSelectionExists('sampler', '#sd_sampler');
     ensureSelectionExists('model', '#sd_model');
 
