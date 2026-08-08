@@ -1,6 +1,6 @@
 import { getContext } from '../../../../extensions.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
-import { collectReferenceImages, getReferenceTargets, needsRosterContext, buildRosterContextBlock, isCastMode } from './reference-images.js';
+import { collectReferenceImages, getReferenceTargets, needsRosterContext, buildRosterContextBlock, isCastMode, resolveActiveCharacterName } from './reference-images.js';
 
 /**
  * Whether the Connection Manager extension is enabled and a prompt-generation profile is selected.
@@ -37,8 +37,15 @@ export async function buildContextMessages(quietPrompt, generationType, settings
     const context = getContext();
     const messages = [];
 
+    // {{char}} normally resolves from the ambient name2, which SillyTavern only sets for the
+    // duration of a specific member's turn inside the group-generation loop - everywhere else
+    // in a group chat (including this out-of-band call) it's '', so {{char}} would silently
+    // resolve to nothing. Pin an explicit name so every substitution below is reliable.
+    const nameOverrides = { name1Override: context.name1, name2Override: resolveActiveCharacterName() };
+    const substitute = (text) => context.substituteParams(text, nameOverrides);
+
     if (settings.prompt_system) {
-        messages.push({ role: 'system', content: context.substituteParams(settings.prompt_system) });
+        messages.push({ role: 'system', content: substitute(settings.prompt_system) });
     }
 
     if (settings.prompt_include_card || settings.prompt_include_persona) {
@@ -61,7 +68,7 @@ export async function buildContextMessages(quietPrompt, generationType, settings
         }
 
         if (settings.prompt_include_persona && fields.persona) {
-            messages.push({ role: 'system', content: context.substituteParams(`{{user}}'s persona:\n${fields.persona}`) });
+            messages.push({ role: 'system', content: substitute(`{{user}}'s persona:\n${fields.persona}`) });
         }
     }
 
@@ -75,7 +82,15 @@ export async function buildContextMessages(quietPrompt, generationType, settings
 
     if (settings.prompt_include_wi) {
         try {
-            const { worldInfoBefore, worldInfoAfter } = await context.getWorldInfoPrompt(context.chat, 8192, true, undefined);
+            // getWorldInfoPrompt/checkWorldInfo want string[], most-recent-first - not the raw
+            // context.chat message-object array. Passing objects throws inside WorldInfoBuffer
+            // (messages[depth].trim is not a function); passing them in chronological order
+            // scans the wrong end of the conversation for {{depth}}-scoped entries.
+            const flatChat = context.chat
+                .filter(m => !m.is_system)
+                .map(m => context.groupId ? `${m.name}: ${m.mes ?? ''}` : (m.mes ?? ''))
+                .reverse();
+            const { worldInfoBefore, worldInfoAfter } = await context.getWorldInfoPrompt(flatChat, 8192, true, {});
             const wiText = `${worldInfoBefore ?? ''}${worldInfoAfter ?? ''}`.trim();
             if (wiText) {
                 messages.push({ role: 'system', content: wiText });
@@ -91,14 +106,14 @@ export async function buildContextMessages(quietPrompt, generationType, settings
         for (const message of historyMessages) {
             const role = message.is_user ? 'user' : 'assistant';
             const namePrefix = context.groupId ? `${message.name}: ` : '';
-            messages.push({ role, content: `${namePrefix}${context.substituteParams(message.mes ?? '')}` });
+            messages.push({ role, content: `${namePrefix}${substitute(message.mes ?? '')}` });
         }
     }
 
     // The image-prompt instruction is always sent as the final USER message, not a system/OOC turn.
     // {{char}}/{{user}}/etc. macros in the template must be resolved here - nothing downstream
     // (ConnectionManagerRequestService.sendRequest / ChatCompletionService) substitutes them.
-    const instruction = context.substituteParams(quietPrompt);
+    const instruction = substitute(quietPrompt);
     let finalContent = instruction;
 
     if (allowImages && settings.prompt_reference_enabled) {
@@ -141,6 +156,16 @@ export async function generatePromptViaProfile(quietPrompt, generationType, sett
 
     if (isTextCompletion && settings.prompt_reference_enabled) {
         console.warn('ImageGen: reference images are not supported on text-completion Connection Profiles, skipping.');
+    }
+
+    // profile.preset is a one-time snapshot of whatever Completion Preset happened to be
+    // selected in the main UI when the profile was created/updated - it's not kept in sync, so
+    // it can end up empty (no preset was selected then, or it's excluded via the profile's own
+    // exclude list) and generation quietly falls back to raw model defaults. (If a preset IS
+    // assigned but has since been renamed/deleted, ChatCompletionService.processRequest already
+    // warns "Preset ... not found" on its own - this only covers the empty case.)
+    if (!profile?.preset) {
+        console.warn('ImageGen: Connection Profile has no Completion Preset assigned - generating with model defaults only. Select the desired preset in the main UI, then click Update on the profile in Connection Manager.');
     }
 
     const messages = await buildContextMessages(quietPrompt, generationType, settings, !isTextCompletion);

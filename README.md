@@ -57,6 +57,14 @@ Without this plugin, OpenRouter generation falls back to the built-in
 If the Connection Manager extension is disabled, or the selected profile fails, generation
 falls back automatically to the chat connection with a warning toast.
 
+**If generation isn't picking up your Completion Preset** (only the model/connection seem to
+apply): a profile's assigned preset is a one-time snapshot of whichever Completion Preset was
+selected in the main UI *at the moment you created or last updated the profile* — it isn't
+kept in sync. If you didn't have one selected then, or it's been renamed/deleted since, the
+profile silently has no preset and generation falls back to raw model defaults. Fix: select
+the desired preset in the main UI, then click **Update** on the profile in Connection
+Manager. Check the browser console for an `ImageGen:` warning confirming which case applies.
+
 ## Cast mode (`/imagine cast`)
 
 A group/lineup shot: every character currently in the scene, together, on a plain neutral

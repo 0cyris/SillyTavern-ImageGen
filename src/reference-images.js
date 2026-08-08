@@ -86,6 +86,36 @@ export function resolveUserAvatarUrl() {
 }
 
 /**
+ * Name to use for {{char}} when substituting macros outside an active generation turn.
+ * In solo chats the ambient name2 (what {{char}} normally resolves from) is reliable. In
+ * group chats it is NOT: SillyTavern only sets name2 for the duration of a specific
+ * member's turn inside the group-generation loop and blanks it otherwise, so an out-of-band
+ * call like this extension's (which never runs through that loop) sees name2 === '' and
+ * {{char}} silently resolves to an empty string. Falls back to the most recent speaker,
+ * then the first non-muted member - the same recency convention used elsewhere here.
+ * @returns {string}
+ */
+export function resolveActiveCharacterName() {
+    const context = getContext();
+
+    if (!context.groupId) {
+        return context.name2 || context.characters?.[context.characterId]?.name || '';
+    }
+
+    const speaking = context.chat?.filter(x => !x.is_system && !x.is_user) ?? [];
+    const lastSpeaker = speaking[speaking.length - 1]?.name;
+    if (lastSpeaker) {
+        return lastSpeaker;
+    }
+
+    const group = context.groups.find(x => x.id === context.groupId);
+    const members = Array.isArray(group?.members) ? group.members : [];
+    const disabledMembers = Array.isArray(group?.disabled_members) ? group.disabled_members : [];
+    const firstMember = members.find(avatar => !disabledMembers.includes(avatar));
+    return firstMember ? (context.characters.find(c => c.avatar === firstMember)?.name || '') : '';
+}
+
+/**
  * URLs of character avatars relevant to the current chat, most-recent-speaker first.
  * In a solo chat this is always a single-element array. In a group chat it walks the
  * chat history backwards collecting distinct speakers, falling back to a random member
@@ -158,9 +188,11 @@ export function resolveGroupRosterAvatars(max) {
  * combining (getCharacterCardFields) only does this when the group's generation_mode is
  * APPEND/APPEND_DISABLED - this covers the default SWAP mode too.
  *
- * {{char}}/{{user}} inside each member's own description are replaced with that member's
- * own name / the persona name - the normal substituteParams() always resolves {{char}} to
- * the *current* speaker, which would be wrong for every other member's self-description.
+ * Each member's own description is run through the full macro engine
+ * (substituteParams) with name2Override set to *that* member's own name, not the ambient
+ * current speaker - so {{char}}, {{notChar}}, {{getvar::x}}, {{setvar::x}}, {{trim}}, etc.
+ * all resolve correctly per-member instead of leaking through unrendered (as a hand-rolled
+ * {{char}}/{{user}}-only regex would) or resolving to the wrong character.
  *
  * Returns null in solo chats (the existing card/persona blocks already cover the single
  * character) or if the group has no eligible members.
@@ -183,9 +215,8 @@ export function buildRosterContextBlock() {
         .map(avatar => context.characters.find(c => c.avatar === avatar))
         .filter(Boolean)
         .map(character => {
-            const description = (character.description || '(no description)')
-                .replace(/\{\{char\}\}/gi, character.name)
-                .replace(/\{\{user\}\}/gi, userName);
+            const raw = character.description || '(no description)';
+            const description = context.substituteParams(raw, { name1Override: userName, name2Override: character.name });
             return `${character.name}:\n${description}`;
         });
 
