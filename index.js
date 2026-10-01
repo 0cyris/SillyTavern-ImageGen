@@ -213,12 +213,30 @@ const promptTemplates = {
 const defaultPrefix = 'best quality, absurdres, aesthetic,';
 const defaultNegative = 'lowres, bad anatomy, bad hands, text, error, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry';
 
+// Natural-language image models read the style best as its own sentence ahead of the
+// scene, so these use the {prompt} macro instead of being comma-prepended.
+const stylePreset = (name, style) => ({
+    name,
+    negative: defaultNegative,
+    prefix: `Art style: ${style}\n\n{prompt}`,
+});
+
 const defaultStyles = [
     {
         name: 'Default',
         negative: defaultNegative,
         prefix: defaultPrefix,
     },
+    stylePreset('Vintage Field Sketch', 'intricate ink sketch on aged, tea-stained parchment, in the manner of a vintage fantasy field-guide illustration. Fine line art, delicate cross-hatching, sepia and monochrome ink tones, the look of an antique tabletop RPG manual.'),
+    stylePreset('Digital Concept Art', 'crisp, modern fantasy digital concept art. Clean painterly rendering, strong rim lighting, highly detailed cloth, leather and metal textures, vivid saturated fantasy colors, polished professional finish.'),
+    stylePreset('1980s TSR Cover Art', '1980s high-fantasy book cover painting in the style of Larry Elmore and Jeff Easley, vintage TSR Dungeons & Dragons cover art. Rich oil paint textures, dramatic fantasy lighting, cinematic composition, soft depth of field.'),
+    stylePreset('Classic RPG Oil Painting', 'classic high-fantasy oil painting, like a 1990s tabletop RPG manual illustration. Heavy canvas texture, visible impasto brushstrokes, dramatic Rembrandt-style chiaroscuro lighting, rich warm color tones.'),
+    stylePreset('Gritty Dark Fantasy', 'gritty dark fantasy illustration. Heavy ink outlines, deep chiaroscuro shadows, high contrast, muted desaturated palette, rough weathered textures, grimdark mood.'),
+    stylePreset('Graphic Novel / Comic', 'modern graphic novel and comic book art. Clean sharp inked line art, vibrant cel shading, bold saturated colors, dramatic lighting, splash-page composition.'),
+    stylePreset('Soft Watercolor', 'soft watercolor painting in the manner of a fairy-tale storybook illustration. Delicate color washes, organic bleeding edges, faint pencil sketch lines visible underneath, light and airy whimsical atmosphere.'),
+    stylePreset('Dark Watercolor & Ink', 'dark fantasy watercolor and ink illustration. Bleeding pools of black ink, raw charcoal texturing, bruised desaturated washes of deep crimson and indigo, eerie organic paint runs, haunting melancholic storybook mood.'),
+    stylePreset('Gothic-Punk', '1990s Gothic-Punk tabletop RPG illustration in the style of Tim Bradstreet. Stark black-and-white ink, extreme chiaroscuro, heavy solid-black shadows, photo-referenced realism, detailed cross-hatching, moody sharp linework.'),
+    stylePreset('Blanche Grimdark', 'John Blanche\'s grimdark illustration style from early Warhammer 40,000 art. Gothic baroque aesthetic, chaotic ink outlines, heavy charcoal textures, sketchy expressive linework, restricted palette of deep crimson, sepia ochre, bone white and dark charcoal, gritty surreal atmosphere.'),
 ];
 
 const placeholderVae = 'Automatic';
@@ -515,7 +533,22 @@ async function loadSettings() {
     }
 
     if (!Array.isArray(S.styles)) {
-        S.styles = defaultStyles;
+        S.styles = structuredClone(defaultStyles);
+    }
+
+    // Seed newly shipped default styles into existing installs once each, tracked by name
+    // so a style the user deleted doesn't come back and one they edited isn't overwritten.
+    if (!Array.isArray(S.seeded_styles)) {
+        S.seeded_styles = [];
+    }
+    for (const style of defaultStyles) {
+        if (S.seeded_styles.includes(style.name)) {
+            continue;
+        }
+        if (!S.styles.some(x => x.name === style.name)) {
+            S.styles.push(structuredClone(style));
+        }
+        S.seeded_styles.push(style.name);
     }
 
     // Preserve an original seed if exists

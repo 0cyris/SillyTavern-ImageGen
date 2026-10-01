@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format loosely follows
 version tags, so entries are grouped by the date they landed on `master` instead of
 per-release version headings.
 
+## 2026-10-01
+
+### Added
+
+- Ten built-in style presets (ink field sketch, digital concept art, 1980s TSR cover art,
+  classic RPG oil painting, gritty dark fantasy, graphic novel, soft watercolor, dark
+  watercolor & ink, Gothic-Punk, Blanche grimdark). They place the style ahead of the
+  scene via the `{prompt}` macro and are added to existing installs once each, without
+  overwriting or resurrecting a user's own edits or deletions.
+
 ## 2026-08-08
 
 ### Added
