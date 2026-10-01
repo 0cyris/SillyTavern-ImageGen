@@ -88,6 +88,8 @@ live — see "Verification" below.
 - Git workflow: feature branches + PRs against `master`, opened via the `tea` CLI
   (`tea pr create --base master --head <branch>`). This repo pushes to a Gitea instance
   that auto-mirrors to GitHub — don't configure a GitHub remote directly.
+- Never include a Claude session link (`Claude-Session:` trailer or any
+  `claude.ai/code/session_...` URL) in commit messages, PR descriptions, or comments.
 
 ## Verification
 
