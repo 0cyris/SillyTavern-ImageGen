@@ -1,5 +1,5 @@
 import { formatCharacterAvatar, getCharacterAvatar, getUserAvatar, user_avatar } from '../../../../../script.js';
-import { getContext } from '../../../../extensions.js';
+import { extension_settings, getContext } from '../../../../extensions.js';
 import { getBase64Async, createThumbnail } from '../../../../utils.js';
 
 const SAFE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -73,7 +73,50 @@ export function getReferenceTargets(mode) {
  * @returns {string}
  */
 export function resolveUserAvatarUrl() {
-    return getUserAvatar(user_avatar);
+    return resolvePmaAvatarUrl() || getUserAvatar(user_avatar);
+}
+
+const PMA_FOLDER = 'Persona-Multi-Avatars';
+
+/**
+ * The avatar Persona-Multi-Avatars has bound to the current chat or character, if any.
+ * PMA only swaps avatars in the DOM and exposes no API, so its active avatar is only
+ * discoverable by reading its settings and replicating its resolution order (chat binding,
+ * then character binding). That format is PMA-internal and may drift, so anything
+ * unexpected falls back silently to the persona's default avatar.
+ * @returns {string|null}
+ */
+function resolvePmaAvatarUrl() {
+    try {
+        const disabled = extension_settings.disabledExtensions ?? [];
+        if (disabled.some(name => name.split('/').pop() === PMA_FOLDER)) {
+            return null;
+        }
+
+        const record = extension_settings.persona_multi_avatars?.data?.[user_avatar];
+        if (!record) {
+            return null;
+        }
+
+        const context = getContext();
+        let charKey = null;
+        if (context.groupId) {
+            charKey = `group:${context.groupId}`;
+        } else if (context.characterId !== undefined && context.characterId !== null && context.characterId >= 0) {
+            charKey = context.characters?.[context.characterId]?.avatar ?? null;
+        }
+        if (!charKey) {
+            return null;
+        }
+
+        const chatKey = context.chatId ? `${charKey}::${context.chatId}` : null;
+        const uploadId = (chatKey && record.chats?.[chatKey]) || record.chars?.[charKey];
+        const upload = uploadId ? record.uploads?.find(u => u.id === uploadId) : null;
+        return upload?.url || upload?.dataUrl || null;
+    } catch (error) {
+        console.debug('[ImageGen] Could not resolve Persona-Multi-Avatars binding', error);
+        return null;
+    }
 }
 
 /**

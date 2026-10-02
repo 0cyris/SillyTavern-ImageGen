@@ -156,6 +156,11 @@ the full non-muted roster in roster order instead of recency, and always reserve
 the persona so a large group can't crowd it out. All of this is capped at the smaller of the
 model's own limit and your configured maximum.
 
+If [Persona-Multi-Avatars](https://github.com/Shin-F/Persona-Multi-Avatars) is installed,
+the persona image is the avatar it has bound to the current chat or character (chat binding
+first), falling back to the persona's default avatar. Still one persona image per generation.
+Bindings are ignored while that extension is disabled.
+
 ### Why only OpenRouter?
 
 The reference-image-to-image-model path (`input_references`) is OpenRouter-only for now —

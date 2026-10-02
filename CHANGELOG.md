@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format loosely follows
 version tags, so entries are grouped by the date they landed on `master` instead of
 per-release version headings.
 
+## 2026-10-02
+
+### Added
+
+- Persona reference images respect [Persona-Multi-Avatars](https://github.com/Shin-F/Persona-Multi-Avatars):
+  the avatar it has bound to the current chat or character is sent instead of the persona's
+  default avatar. No dependency on it; falls back to the default avatar when it's absent,
+  disabled, or its data is unexpected.
+
 ## 2026-10-01
 
 ### Added
